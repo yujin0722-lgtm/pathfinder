@@ -81,6 +81,30 @@
   .swatch { width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; display: block; }
   .swatch.selected { border: 2px solid var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 
+  /* Citrail風の詳細パネル(タグ+タイトル+dl形式の項目) */
+  .p-top { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 2px; }
+  .p-tag-select { font-size: 11px; border: none; border-radius: 4px; padding: 2px 6px; background: var(--accent-soft); color: var(--accent); cursor: pointer; }
+  .p-title-input { font-size: 14.5px; font-weight: 600; border: none; border-bottom: 1px solid transparent; width: 100%; padding: 3px 0; background: transparent; }
+  .p-title-input:focus { border-bottom: 1px solid var(--accent); outline: none; }
+  .node-dl { display: grid; grid-template-columns: 52px 1fr; gap: 6px 10px; font-size: 12.5px; align-items: center; margin: 10px 0; }
+  .node-dl dt { color: var(--sub); margin: 0; }
+  .node-dl dd { margin: 0; }
+  .node-dl dd input[type=text] { width: 100%; padding: 4px 6px; font-size: 12.5px; border: 1px solid var(--line); border-radius: 5px; font-family: inherit; }
+  .pmid-row { display: flex; align-items: center; gap: 6px; }
+  .pmid-row a, .pmid-row button { font-size: 11.5px; white-space: nowrap; }
+  .lock-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sub); margin: 14px 0 4px; cursor: pointer; }
+
+  /* ノード上の年数バッジ・固定バッジ・外側タイトルラベル */
+  .node-year-badge-bg { fill: #fff; stroke: var(--line); stroke-width: 1; }
+  .node-year-badge { font-size: 10px; fill: var(--sub); text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .node-lock-badge { font-size: 11px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .node-outside-label { font-size: 11.5px; fill: var(--ink); text-anchor: middle; pointer-events: none; }
+
+  /* エビデンスノードのメモ展開表示 */
+  .memo-expand-content { box-sizing: border-box; width: 100%; height: 100%; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 10px rgba(28,43,51,0.18); font-size: 12.5px; padding: 8px; overflow-y: auto; }
+  .memo-expand-content .close-btn { float: right; border: 1px solid var(--line); background: var(--canvas); border-radius: 4px; font-size: 11px; padding: 2px 8px; cursor: pointer; margin-left: 6px; }
+  .memo-expand-content .memo-expand-body { margin-top: 24px; white-space: pre-wrap; word-break: break-word; }
+
   #statusbar { flex: none; height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--sub); background: var(--panel); }
 
   #mapsModal { display: none; position: fixed; inset: 0; background: rgba(28,43,51,0.45); align-items: center; justify-content: center; z-index: 50; }
@@ -188,10 +212,10 @@
   var STUDY_TYPES = ["RCT","META","REVIEW","OBS","GUIDE","CASE","OTHER"];
   var STUDY_LABEL = { RCT: "RCT", META: "メタ解析・SR", REVIEW: "レビュー", OBS: "観察研究", GUIDE: "ガイドライン", CASE: "症例報告", OTHER: "その他・未定" };
 
-  var EDGE_CATEGORIES = ["support","oppose","supplement","free"];
-  var EDGE_CATEGORY_LABEL = { support: "支持する", oppose: "反論する", supplement: "補足する", free: "分類なし(自由記述)" };
-  var EDGE_CATEGORY_DEFAULT_COLOR = { support: "#2e7d32", oppose: "#c62828", supplement: "#546e7a", free: "#8d6e63" };
-  var EDGE_COLOR_PRESETS = ["#2e7d32","#c62828","#546e7a","#8d6e63","#1565c0","#6a1b9a"];
+  // 手動リンクの色プリセット(パステル調)
+  var EDGE_COLOR_PRESETS = ["#a8d8b9","#f4a9a8","#a9c9ef","#f6cf8e","#c9b3e0","#b8b8b8"];
+  // ノードの色プリセット(4種類のノード共通)
+  var NODE_COLOR_PRESETS = ["#ffffff","#cfe9fb","#d7f0d8","#fff4c2","#ffd9d9","#e6d7f5","#ffe3c2","#d9d9d9"];
 
   var svg = document.getElementById('canvas');
   var viewport = document.getElementById('viewport');
@@ -675,35 +699,50 @@
     return el;
   }
 
-  function nodeLabelText(node){
-    if (node.nodeType === 'paper') return node.title || '(無題のエビデンス)';
-    return (node.text || '').split('\n')[0] || '(空)';
+  // エビデンスノードの中に表示する短い抜粋(メモの冒頭、無ければタイトルの冒頭)
+  function nodeInsideExcerpt(node){
+    var src = (node.memo && node.memo.trim()) ? node.memo.trim() : (node.title || '');
+    src = src.replace(/\n/g, ' ');
+    return truncate(src, 10) || '(空)';
   }
 
-  // 日本語は単語区切りがないため、ノードの大きさに応じて文字数ベースで折り返す
+  function nodeLabelText(node){
+    if (node.nodeType === 'paper') return nodeInsideExcerpt(node);
+    return node.text || '(空)';
+  }
+
+  // 日本語は単語区切りがないため、ノードの大きさに応じて文字数ベースで折り返す。
+  // 改行(\n)は強制的な行区切りとして扱い、以降の内容も表示対象に含める。
   function wrapLabelLines(text, node){
     text = String(text || '');
     var charWidth = 7.2; // 12pxフォントでのおおよその1文字あたりの幅(px)
     var maxCharsPerLine = Math.max(3, Math.floor((node.width - 14) / charWidth));
     var maxLines = Math.max(1, Math.floor((node.height - 16) / 15));
-    var lines = [];
-    var i = 0;
-    while (i < text.length && lines.length < maxLines){
-      var remaining = text.length - i;
-      var take = Math.min(maxCharsPerLine, remaining);
-      var isLastAllowedLine = (lines.length === maxLines - 1);
-      if (isLastAllowedLine && remaining > take){
-        lines.push(text.slice(i, i + Math.max(1, take - 1)) + '…');
-      } else {
-        lines.push(text.slice(i, i + take));
+    var allLines = [];
+    text.split('\n').forEach(function(para){
+      if (para === ''){ allLines.push(''); return; }
+      var i = 0;
+      while (i < para.length){
+        allLines.push(para.slice(i, i + maxCharsPerLine));
+        i += maxCharsPerLine;
       }
-      i += take;
-    }
-    if (!lines.length) lines.push('');
-    return lines;
+    });
+    if (!allLines.length) allLines.push('');
+    if (allLines.length <= maxLines) return allLines;
+    var shown = allLines.slice(0, maxLines);
+    var last = shown[maxLines-1];
+    shown[maxLines-1] = (last.length > 1 ? last.slice(0, -1) : last) + '…';
+    return shown;
   }
 
   /* ---- 描画 ---- */
+  var expandedMemoIds = {}; // どのエビデンスノードのメモが展開表示中か(保存はしない一時的な状態)
+  function toggleMemoExpand(nodeId){
+    if (expandedMemoIds[nodeId]) delete expandedMemoIds[nodeId];
+    else expandedMemoIds[nodeId] = true;
+    renderQuiet();
+  }
+
   function renderNode(node){
     var g = svgEl('g', { class: 'node-group', 'data-id': node.id });
     var isSelected = (selected.type==='node' && selected.id===node.id);
@@ -730,6 +769,28 @@
     });
     g.appendChild(label);
 
+    if (node.nodeType === 'paper'){
+      // 出版年バッジ(左上)
+      if (node.year){
+        var ybw = 30, ybh = 15;
+        var ybx = node.x + 2, yby = node.y + 2;
+        g.appendChild(svgEl('rect', { x: ybx, y: yby, width: ybw, height: ybh, rx: 3, ry: 3, class: 'node-year-badge-bg' }));
+        var ytext = svgEl('text', { x: ybx+ybw/2, y: yby+ybh/2, class: 'node-year-badge' });
+        ytext.textContent = node.year;
+        g.appendChild(ytext);
+      }
+      // タイトルをノード外側・下に表示(Citrail風、約30文字)
+      var outside = svgEl('text', { x: cx, y: node.y + node.height + 14, class: 'node-outside-label' });
+      outside.textContent = truncate(node.title || '(無題のエビデンス)', 30);
+      g.appendChild(outside);
+    }
+
+    if (node.locked){
+      var lockText = svgEl('text', { x: node.x+10, y: node.y+node.height-8, class: 'node-lock-badge' });
+      lockText.textContent = '🔒';
+      g.appendChild(lockText);
+    }
+
     if (isSelected){
       var handleSize = 10;
       var handle = svgEl('rect', {
@@ -744,18 +805,54 @@
     g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
     g.addEventListener('touchstart', function(evt){ onNodeMouseDown(evt, node); }, {passive:false});
     nodeLayer.appendChild(g);
+
+    if (node.nodeType === 'paper' && expandedMemoIds[node.id]){
+      nodeLayer.appendChild(renderMemoExpandBox(node));
+    }
+  }
+
+  function renderMemoExpandBox(node){
+    var boxW = 220, boxH = 150;
+    var x = node.x + node.width - 20;
+    var y = node.y - 10;
+    var fo = svgEl('foreignObject', { x: x, y: y, width: boxW, height: boxH, class: 'memo-expand-box' });
+    fo.addEventListener('mousedown', function(evt){ evt.stopPropagation(); });
+    fo.addEventListener('touchstart', function(evt){ evt.stopPropagation(); }, {passive:false});
+    var div = document.createElement('div');
+    div.className = 'memo-expand-content';
+    var btn = document.createElement('button');
+    btn.className = 'close-btn';
+    btn.type = 'button';
+    btn.textContent = '折りたたむ';
+    btn.addEventListener('click', function(evt){ evt.stopPropagation(); toggleMemoExpand(node.id); });
+    var body = document.createElement('div');
+    body.className = 'memo-expand-body';
+    body.textContent = (node.memo && node.memo.trim()) ? node.memo : (node.title || '(メモがありません)');
+    div.appendChild(btn);
+    div.appendChild(body);
+    fo.appendChild(div);
+    return fo;
   }
 
   function truncate(s, n){ s = String(s); return s.length > n ? s.slice(0,n-1) + '…' : s; }
 
   function nodeBoundaryPoint(node, towardX, towardY){
     var cx = node.x + node.width/2, cy = node.y + node.height/2;
-    var rx = node.width/2, ry = node.height/2;
     var dx = towardX-cx, dy = towardY-cy;
     if (dx===0 && dy===0) return {x:cx,y:cy};
-    var t = 1/Math.sqrt(Math.pow(dx/rx,2)+Math.pow(dy/ry,2));
-    t = Math.min(t,1);
-    return { x: cx+dx*t, y: cy+dy*t };
+    // 臨床疑問・結論・メモは長方形に近い形なので、矢印が中に埋まらないよう
+    // 長方形との交点を厳密に計算する(楕円近似だと角に近い方向で内側に入り込んでしまうため)
+    if (node.nodeType === 'question' || node.nodeType === 'conclusion' || node.nodeType === 'memo'){
+      var hw = node.width/2, hh = node.height/2;
+      var tx = dx !== 0 ? hw/Math.abs(dx) : Infinity;
+      var ty = dy !== 0 ? hh/Math.abs(dy) : Infinity;
+      var t = Math.min(tx, ty, 1);
+      return { x: cx+dx*t, y: cy+dy*t };
+    }
+    var rx = node.width/2, ry = node.height/2;
+    var t2 = 1/Math.sqrt(Math.pow(dx/rx,2)+Math.pow(dy/ry,2));
+    t2 = Math.min(t2,1);
+    return { x: cx+dx*t2, y: cy+dy*t2 };
   }
 
   // 同じノードペアに複数のリンク(自動+手動など)がある場合、重ならないよう
@@ -796,7 +893,7 @@
     }
 
     var g = svgEl('g', { class: 'edge-group', 'data-id': edge.id });
-    var color = edge.auto ? '#9e9e9e' : (edge.color || EDGE_CATEGORY_DEFAULT_COLOR[edge.category] || '#546e7a');
+    var color = edge.auto ? '#9e9e9e' : (edge.color || EDGE_COLOR_PRESETS[0]);
     var path = svgEl('path', { d:d, stroke: color, class: 'edge-path' + (selected.type==='edge'&&selected.id===edge.id?' selected':'') });
     if (edge.auto){
       path.setAttribute('stroke-dasharray', '6,4');
@@ -860,22 +957,57 @@
     return '<label>' + labelText + '</label>' + inputHtml;
   }
 
+  function nodeColorSwatchRowHtml(node){
+    return '<label>色</label><div class="swatch-row" id="n-swatches">' + NODE_COLOR_PRESETS.map(function(c){
+      return '<span class="swatch'+(node.color===c?' selected':'')+'" data-color="'+c+'" style="background:'+c+';"></span>';
+    }).join('') + '</div>';
+  }
+  function wireNodeColorSwatches(node){
+    var swatches = document.querySelectorAll('#n-swatches .swatch');
+    for (var i=0;i<swatches.length;i++){
+      (function(sw){
+        sw.addEventListener('click', function(){
+          node.color = sw.getAttribute('data-color');
+          pushHistory(); render();
+        });
+      })(swatches[i]);
+    }
+  }
+  function lockRowHtml(node){
+    return '<label class="lock-row"><input type="checkbox" id="f-locked"'+(node.locked?' checked':'')+'> 📌 位置を固定する(ドラッグ・年代整列の対象外にする)</label>';
+  }
+  function wireLockCheckbox(node){
+    document.getElementById('f-locked').addEventListener('change', function(){
+      node.locked = this.checked; pushHistory(); render();
+    });
+  }
+
   function renderNodePanel(node){
     var html = '<h3>' + ({paper:'エビデンスノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'メモノート'}[node.nodeType]) + '</h3>';
     if (node.nodeType === 'paper'){
-      html += '<label>DOI(任意)</label><div style="display:flex;gap:6px;"><input type="text" id="f-doi" value="'+escAttr(node.doi)+'" style="flex:1;" placeholder="10.1001/xxxxx"><button id="f-doi-fetch" style="flex:none;" title="OpenAlexから書誌情報を取得">取得</button></div>';
-      html += fieldRow('タイトル', '<input type="text" id="f-title" value="'+escAttr(node.title)+'">');
-      html += fieldRow('著者', '<input type="text" id="f-authors" value="'+escAttr(node.authors)+'">');
-      html += '<div class="row2">' +
-        '<div>' + fieldRow('発表年', '<input type="text" id="f-year" value="'+escAttr(node.year)+'">') + '</div>' +
-        '<div>' + fieldRow('雑誌', '<input type="text" id="f-journal" value="'+escAttr(node.journal)+'">') + '</div>' +
+      html += '<div class="p-top">' +
+        '<select id="f-studytype" class="p-tag-select">' + STUDY_TYPES.map(function(t){
+          return '<option value="'+t+'"'+(node.studyType===t?' selected':'')+'>'+STUDY_LABEL[t]+'</option>';
+        }).join('') + '</select>' +
+        '<input type="text" id="f-title" class="p-title-input" value="'+escAttr(node.title)+'">' +
       '</div>';
-      html += '<label>研究種別</label><select id="f-studytype">' + STUDY_TYPES.map(function(t){
-        return '<option value="'+t+'"'+(node.studyType===t?' selected':'')+'>'+STUDY_LABEL[t]+'</option>';
-      }).join('') + '</select>';
+      html += '<label>DOI(任意)</label><div style="display:flex;gap:6px;"><input type="text" id="f-doi" value="'+escAttr(node.doi)+'" style="flex:1;" placeholder="10.1001/xxxxx"><button id="f-doi-fetch" style="flex:none;" title="OpenAlexから書誌情報を取得">取得</button></div>';
+      html += '<div class="node-dl">' +
+        '<dt>著者</dt><dd><input type="text" id="f-authors" value="'+escAttr(node.authors)+'"></dd>' +
+        '<dt>発表年</dt><dd><input type="text" id="f-year" value="'+escAttr(node.year)+'"></dd>' +
+        '<dt>雑誌</dt><dd><input type="text" id="f-journal" value="'+escAttr(node.journal)+'"></dd>' +
+        '<dt>PMID</dt><dd class="pmid-row">' +
+          '<span>'+ (node.pmid ? escHtml(node.pmid) : '取得なし') +'</span>' +
+          (node.pmid ? '<a href="https://pubmed.ncbi.nlm.nih.gov/'+encodeURIComponent(node.pmid)+'/" target="_blank" rel="noopener noreferrer" id="f-pubmed-link">PubMedを開く</a>' : '') +
+        '</dd>' +
+      '</div>';
       html += fieldRow('メモ(鍵となる知見・引用文など)', '<textarea id="f-memo">'+escHtml(node.memo)+'</textarea>');
+      html += nodeColorSwatchRowHtml(node);
+      html += lockRowHtml(node);
     } else {
       html += fieldRow('内容', '<textarea id="f-text" rows="6">'+escHtml(node.text)+'</textarea>');
+      html += nodeColorSwatchRowHtml(node);
+      html += lockRowHtml(node);
     }
     html += '<button id="delbtn">このノードを削除</button>';
     proppanel.innerHTML = html;
@@ -887,9 +1019,9 @@
       });
       wireInput('f-title', function(v){ node.title = v; renderQuiet(); });
       wireInput('f-authors', function(v){ node.authors = v; });
-      wireInput('f-year', function(v){ node.year = v; });
+      wireInput('f-year', function(v){ node.year = v; renderQuiet(); });
       wireInput('f-journal', function(v){ node.journal = v; });
-      wireInput('f-memo', function(v){ node.memo = v; });
+      wireInput('f-memo', function(v){ node.memo = v; renderQuiet(); });
       document.getElementById('f-studytype').addEventListener('change', function(){
         node.studyType = this.value; pushHistory(); render();
       });
@@ -900,6 +1032,8 @@
         renderQuiet();
       });
     }
+    wireNodeColorSwatches(node);
+    wireLockCheckbox(node);
     document.getElementById('delbtn').addEventListener('click', function(){
       deleteNode(node.id); pushHistory(); render();
     });
@@ -911,9 +1045,6 @@
       return;
     }
     var html = '<h3>リンク</h3>';
-    html += '<label>種類</label><select id="e-category">' + EDGE_CATEGORIES.map(function(c){
-      return '<option value="'+c+'"'+(edge.category===c?' selected':'')+'>'+EDGE_CATEGORY_LABEL[c]+'</option>';
-    }).join('') + '</select>';
     html += fieldRow('自由記述ラベル(任意)', '<input type="text" id="e-label" value="'+escAttr(edge.label)+'">');
     html += '<label>色</label><div class="swatch-row" id="e-swatches">' + EDGE_COLOR_PRESETS.map(function(c){
       return '<span class="swatch'+(edge.color===c?' selected':'')+'" data-color="'+c+'" style="background:'+c+';"></span>';
@@ -926,11 +1057,6 @@
     html += '<button id="delbtn">このリンクを削除</button>';
     proppanel.innerHTML = html;
 
-    document.getElementById('e-category').addEventListener('change', function(){
-      edge.category = this.value;
-      if (!edge.colorManuallySet) edge.color = EDGE_CATEGORY_DEFAULT_COLOR[edge.category];
-      pushHistory(); render();
-    });
     wireInput('e-label', function(v){ edge.label = v; });
     document.getElementById('e-direction').addEventListener('change', function(){
       edge.direction = this.value; pushHistory(); render();
@@ -940,7 +1066,6 @@
       (function(sw){
         sw.addEventListener('click', function(){
           edge.color = sw.getAttribute('data-color');
-          edge.colorManuallySet = true;
           pushHistory(); render();
         });
       })(swatches[i]);
@@ -1065,10 +1190,10 @@
      同じ年のノードは重ならないよう縦に並べる。 */
   function layoutByYear(){
     var dated = state.nodes.filter(function(n){
-      return n.nodeType === 'paper' && n.year && !isNaN(parseInt(n.year,10));
+      return n.nodeType === 'paper' && !n.locked && n.year && !isNaN(parseInt(n.year,10));
     });
     if (dated.length < 2){
-      alert('発表年が入力されているエビデンスノードが2件以上ないと整列できません。');
+      alert('発表年が入力されている、位置固定されていないエビデンスノードが2件以上ないと整列できません。');
       return;
     }
     var years = dated.map(function(n){ return parseInt(n.year,10); });
@@ -1097,6 +1222,38 @@
     fitToView();
   }
 
+  /* Citrailから新しく取り込んだノードだけを対象に、発表年で一度だけ整列する。
+     既存の内容と重ならないよう、取り込み前の内容の下(または空なら原点)に配置する。
+     対象(発表年入りエビデンス)が1件以下の場合は何もしない(既定のグリッド配置のまま)。 */
+  function layoutNewImportedNodes(newNodes, existingBounds){
+    var dated = newNodes.filter(function(n){
+      return n.nodeType === 'paper' && n.year && !isNaN(parseInt(n.year,10));
+    });
+    if (dated.length < 2) return;
+    var years = dated.map(function(n){ return parseInt(n.year,10); });
+    var minYear = Math.min.apply(null, years), maxYear = Math.max.apply(null, years);
+    var yearSpan = Math.max(maxYear - minYear, 1);
+    var totalWidth = Math.max(700, dated.length * 170);
+    var xScale = totalWidth / yearSpan;
+    var vGap = 150;
+    var baseX = existingBounds ? existingBounds.minX : 0;
+    var baseY = existingBounds ? existingBounds.maxY + 150 : 0;
+
+    var groups = {};
+    dated.forEach(function(n){
+      var y = parseInt(n.year,10);
+      (groups[y] = groups[y] || []).push(n);
+    });
+    Object.keys(groups).forEach(function(yearKey){
+      var group = groups[yearKey];
+      var x = baseX + (parseInt(yearKey,10) - minYear) * xScale;
+      group.forEach(function(n, i){
+        n.x = x - n.width/2;
+        n.y = baseY + i*vGap;
+      });
+    });
+  }
+
   /* ---- PNG書き出し ---- */
   function exportPng(){
     var b = computeContentBounds();
@@ -1120,6 +1277,10 @@
       '.node-shape{stroke:#666;stroke-width:1.3;}' +
       '.node-shape.type-question,.node-shape.type-conclusion{stroke-width:2;}' +
       '.node-label{font-size:12px;text-anchor:middle;dominant-baseline:middle;fill:#1C2B33;font-family:sans-serif;}' +
+      '.node-year-badge-bg{fill:#fff;stroke:#DDE5EA;stroke-width:1;}' +
+      '.node-year-badge{font-size:10px;fill:#5B6B77;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}' +
+      '.node-lock-badge{font-size:11px;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}' +
+      '.node-outside-label{font-size:11.5px;fill:#1C2B33;text-anchor:middle;font-family:sans-serif;}' +
       '.edge-path{fill:none;stroke-width:2;}' +
       '.edge-label-bg{fill:#fff;stroke:#ccc;stroke-width:1;}' +
       '.edge-label{font-size:11px;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}';
@@ -1134,6 +1295,7 @@
     nodeClone.querySelectorAll('.selected').forEach(function(el){ el.classList.remove('selected'); });
     nodeClone.querySelectorAll('.resize-handle').forEach(function(el){ el.remove(); });
     nodeClone.querySelectorAll('.edge-hit').forEach(function(el){ el.remove(); });
+    nodeClone.querySelectorAll('.memo-expand-box').forEach(function(el){ el.remove(); });
     edgeClone.querySelectorAll('.edge-hit').forEach(function(el){ el.remove(); });
     exportSvg.appendChild(edgeClone);
     exportSvg.appendChild(nodeClone);
@@ -1175,7 +1337,7 @@
       } else if (edgeDraftSource !== node.id){
         var edge = {
           id: newId('edge'), sourceNodeId: edgeDraftSource, targetNodeId: node.id,
-          category: 'free', label: '', color: EDGE_CATEGORY_DEFAULT_COLOR.free, direction: 'one'
+          label: '', color: EDGE_COLOR_PRESETS[0], direction: 'one'
         };
         state.edges.push(edge);
         pushHistory();
@@ -1186,7 +1348,11 @@
     }
     selectItem('node', node.id);
     var startWorld = screenToWorld(evt);
-    dragging = { id: node.id, offX: startWorld.x - node.x, offY: startWorld.y - node.y };
+    var pt = eventPoint(evt);
+    dragging = {
+      id: node.id, offX: startWorld.x - node.x, offY: startWorld.y - node.y,
+      startClientX: pt.clientX, startClientY: pt.clientY, moved: false, locked: !!node.locked
+    };
   }
 
   function onResizeHandleMouseDown(evt, node){
@@ -1217,6 +1383,12 @@
 
   window.addEventListener('mousemove', function(evt){
     if (dragging){
+      var pt = eventPoint(evt);
+      if (!dragging.moved){
+        var mdx = pt.clientX - dragging.startClientX, mdy = pt.clientY - dragging.startClientY;
+        if (Math.sqrt(mdx*mdx + mdy*mdy) > 4) dragging.moved = true;
+      }
+      if (dragging.locked) return; // 固定されたノードはドラッグで動かさない
       var w = screenToWorld(evt);
       var node = getNode(dragging.id);
       if (node){ node.x = w.x - dragging.offX; node.y = w.y - dragging.offY; renderQuiet(); }
@@ -1235,7 +1407,20 @@
     }
   });
   window.addEventListener('mouseup', function(){
-    if (dragging){ dragging = null; pushHistory(); render(); }
+    if (dragging){
+      var nid = dragging.id, moved = dragging.moved, wasLocked = dragging.locked;
+      dragging = null;
+      if (!moved){
+        // ドラッグせずクリックのみだった場合: エビデンスノードならメモの展開/折りたたみを切り替える
+        var n = getNode(nid);
+        if (n && n.nodeType === 'paper') toggleMemoExpand(nid);
+        else render();
+      } else if (!wasLocked){
+        pushHistory(); render();
+      } else {
+        render();
+      }
+    }
     if (resizing){ resizing = null; pushHistory(); render(); }
     isPanning = false; panStart = null;
   });
@@ -1382,7 +1567,9 @@
   }
 
   function importPapersFromCitrail(papers){
+    var existingBounds = computeContentBounds();
     var x0 = 120, y0 = 120, added = 0, skipped = 0;
+    var newNodes = [];
     papers.forEach(function(cp){
       if (findExistingPaperNode(cp)){ skipped++; return; }
       var node = createNode('paper', x0 + (added % 4) * 190, y0 + Math.floor(added/4) * 130);
@@ -1396,9 +1583,11 @@
       node.referencedWorks = Array.isArray(cp.referencedWorks) ? cp.referencedWorks : [];
       node.studyType = (STUDY_TYPES.indexOf(cp.study) !== -1) ? cp.study : 'OTHER';
       state.nodes.push(node);
+      newNodes.push(node);
       added++;
     });
     recomputeAutoLinks();
+    layoutNewImportedNodes(newNodes, existingBounds);
     pushHistory();
     render();
     fitToView();
