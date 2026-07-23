@@ -1126,10 +1126,25 @@
   /* ---- Citrailからの受け取り(Local Storage経由) ---- */
   var PF_HANDOFF_KEY = 'chm_to_pathfinder';
 
+  /* 既にこの地図にある論文ノードと同じ論文か(DOI・PMID・OpenAlex IDのいずれか一致で判定) */
+  function findExistingPaperNode(cp){
+    var doi = (cp.doi || '').trim().toLowerCase();
+    var pmid = (cp.pmid || '').trim();
+    var oaId = (cp.id || '').trim();
+    return state.nodes.find(function(n){
+      if (n.nodeType !== 'paper') return false;
+      if (doi && (n.doi || '').trim().toLowerCase() === doi) return true;
+      if (pmid && (n.pmid || '').trim() === pmid) return true;
+      if (oaId && (n.openalexId || '').trim() === oaId) return true;
+      return false;
+    });
+  }
+
   function importPapersFromCitrail(papers){
-    var x0 = 120, y0 = 120;
-    papers.forEach(function(cp, i){
-      var node = createNode('paper', x0 + (i % 4) * 190, y0 + Math.floor(i/4) * 130);
+    var x0 = 120, y0 = 120, added = 0, skipped = 0;
+    papers.forEach(function(cp){
+      if (findExistingPaperNode(cp)){ skipped++; return; }
+      var node = createNode('paper', x0 + (added % 4) * 190, y0 + Math.floor(added/4) * 130);
       node.title = cp.title || node.title;
       node.authors = Array.isArray(cp.authors) ? cp.authors.join(', ') : (cp.authors || '');
       node.year = (cp.year != null) ? String(cp.year) : '';
@@ -1140,11 +1155,15 @@
       node.referencedWorks = Array.isArray(cp.referencedWorks) ? cp.referencedWorks : [];
       node.studyType = (STUDY_TYPES.indexOf(cp.study) !== -1) ? cp.study : 'OTHER';
       state.nodes.push(node);
+      added++;
     });
     recomputeAutoLinks();
     pushHistory();
     render();
     fitToView();
+    if (skipped > 0){
+      alert(added + '件を追加しました。' + skipped + '件はすでにこの地図にある論文と同じ(DOI・PMID・OpenAlex IDが一致)ため、重複して追加しませんでした。');
+    }
   }
 
   function checkIncomingHandoff(){
