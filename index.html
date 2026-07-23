@@ -840,9 +840,12 @@
     var cx = node.x + node.width/2, cy = node.y + node.height/2;
     var dx = towardX-cx, dy = towardY-cy;
     if (dx===0 && dy===0) return {x:cx,y:cy};
-    // 臨床疑問・結論・メモは長方形に近い形なので、矢印が中に埋まらないよう
-    // 長方形との交点を厳密に計算する(楕円近似だと角に近い方向で内側に入り込んでしまうため)
-    if (node.nodeType === 'question' || node.nodeType === 'conclusion' || node.nodeType === 'memo'){
+    // 臨床疑問・結論・メモ・レビュー系エビデンス(角丸長方形)は長方形に近い形なので、
+    // 矢印が中に埋まらないよう長方形との交点を厳密に計算する
+    // (楕円近似だと角に近い方向で内側に入り込んでしまうため。ノードを大きくするほど誤差が目立つ)
+    var isRectLike = node.nodeType === 'question' || node.nodeType === 'conclusion' || node.nodeType === 'memo' ||
+      (node.nodeType === 'paper' && node.studyType === 'REVIEW');
+    if (isRectLike){
       var hw = node.width/2, hh = node.height/2;
       var tx = dx !== 0 ? hw/Math.abs(dx) : Infinity;
       var ty = dy !== 0 ? hh/Math.abs(dy) : Infinity;
