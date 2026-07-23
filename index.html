@@ -67,6 +67,16 @@
   .swatch.selected { border: 2px solid #1a6bd6; box-shadow: 0 0 0 1px #1a6bd6 inset; }
 
   #statusbar { flex: none; height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid #ddd; font-size: 12px; color: #666; background: #fff; }
+
+  #mapsModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); align-items: center; justify-content: center; z-index: 50; }
+  #mapsModal .box { background: #fff; border-radius: 10px; padding: 20px; width: 440px; max-height: 70vh; overflow-y: auto; }
+  #mapsModal h3 { margin: 0 0 12px; font-size: 15px; }
+  .map-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; gap: 10px; }
+  .map-row .meta { font-size: 12px; color: #999; }
+  .map-row .name { font-size: 13px; cursor: text; }
+  .map-row .name:hover { text-decoration: underline; color: #1a6bd6; }
+  .map-row .name.current { font-weight: 700; }
+  .map-row button { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -74,7 +84,8 @@
 
   <div id="topbar">
     <input id="title" type="text" value="無題の地図" title="この地図の名前(臨床疑問の要約など)"/>
-    <button id="btn-new">新規作成</button>
+    <button id="btn-new" title="新しい地図をこの一覧に追加して開く">新しい地図</button>
+    <button id="btn-maps" title="保存されている地図の一覧を開く">地図一覧</button>
     <button id="btn-export-json" title="今の地図をJSONファイルとして書き出す">JSONで書き出し</button>
     <button id="btn-import-json" title="JSONファイルから読み込む">JSONを読み込む</button>
     <input type="file" id="import-json-input" accept="application/json,.json" style="display:none;">
@@ -124,13 +135,19 @@
     <span id="stat-zoom">ズーム: 100%</span>
   </div>
 
+  <div id="mapsModal">
+    <div class="box">
+      <h3>地図一覧</h3>
+      <div id="mapsList"></div>
+      <button id="btn-close-maps" style="margin-top:14px;">閉じる</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
 (function(){
   "use strict";
-
-  var STORAGE_KEY = "pf_current_map";
 
   var STUDY_TYPES = ["RCT","META","REVIEW","OBS","GUIDE","CASE","OTHER"];
   var STUDY_LABEL = { RCT: "RCT", META: "メタ解析・SR", REVIEW: "レビュー", OBS: "観察研究", GUIDE: "ガイドライン", CASE: "症例報告", OTHER: "その他・未定" };
@@ -199,20 +216,60 @@
     autosave();
   }
 
-  /* ---- Local Storage 自動保存 ---- */
+  /* ---- Local Storage 自動保存(複数地図の一覧管理) ---- */
   function storageAvailable(){
     try { localStorage.setItem('__pf_test','1'); localStorage.removeItem('__pf_test'); return true; } catch(e){ return false; }
   }
   var HAS_STORAGE = storageAvailable();
+
+  var MAPS_INDEX_KEY = 'pf_maps_index';
+  var LAST_MAP_KEY = 'pf_last_map_id';
+  var LEGACY_MAP_KEY = 'pf_current_map'; // v0.1で使っていた単一地図の保存先(移行用)
+  function mapDataKey(id){ return 'pf_map_' + id; }
+  function genMapId(){ return 'map_' + Date.now() + '_' + Math.random().toString(36).slice(2,8); }
+
+  var currentMapId = null;
+
+  function loadMapsIndex(){
+    if (!HAS_STORAGE) return [];
+    try { return JSON.parse(localStorage.getItem(MAPS_INDEX_KEY) || '[]'); } catch(e){ return []; }
+  }
+  function saveMapsIndex(index){
+    if (!HAS_STORAGE) return;
+    try { localStorage.setItem(MAPS_INDEX_KEY, JSON.stringify(index)); } catch(e){}
+  }
+
+  /* v0.1(単一地図のみ)のデータが残っている場合、一覧形式に移行する */
+  function migrateLegacyIfNeeded(){
+    if (!HAS_STORAGE) return;
+    if (localStorage.getItem(MAPS_INDEX_KEY)) return;
+    var legacyRaw = localStorage.getItem(LEGACY_MAP_KEY);
+    var data = null;
+    try { data = legacyRaw ? JSON.parse(legacyRaw) : null; } catch(e){ data = null; }
+    if (!data || !Array.isArray(data.nodes)) return;
+    var id = genMapId();
+    localStorage.setItem(mapDataKey(id), JSON.stringify(data));
+    saveMapsIndex([{ id: id, title: data.title || '無題の地図', updatedAt: new Date().toISOString() }]);
+    localStorage.setItem(LAST_MAP_KEY, id);
+    localStorage.removeItem(LEGACY_MAP_KEY);
+  }
+
   var saveTimer = null;
   function autosave(){
-    if (!HAS_STORAGE) return;
+    if (!HAS_STORAGE || !currentMapId) return;
     var note = document.getElementById('savenote');
     note.textContent = '保存中…';
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function(){
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(mapDataKey(currentMapId), JSON.stringify(state));
+        localStorage.setItem(LAST_MAP_KEY, currentMapId);
+        var index = loadMapsIndex();
+        var entry = index.find(function(m){ return m.id === currentMapId; });
+        var now = new Date().toISOString();
+        if (entry){ entry.title = state.title; entry.updatedAt = now; }
+        else { index.push({ id: currentMapId, title: state.title, updatedAt: now }); }
+        saveMapsIndex(index);
         var t = new Date();
         note.textContent = '保存済み(' + t.getHours() + ':' + String(t.getMinutes()).padStart(2,'0') + ')';
       } catch(e){
@@ -220,16 +277,137 @@
       }
     }, 500);
   }
-  function loadFromStorage(){
-    if (!HAS_STORAGE) return false;
+
+  function loadMapData(id){
+    if (!HAS_STORAGE) return null;
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
+      var raw = localStorage.getItem(mapDataKey(id));
+      if (!raw) return null;
       var loaded = JSON.parse(raw);
-      if (!loaded || !Array.isArray(loaded.nodes)) return false;
-      state = loaded;
-      return true;
-    } catch(e){ return false; }
+      if (!loaded || !Array.isArray(loaded.nodes)) return null;
+      return loaded;
+    } catch(e){ return null; }
+  }
+
+  function openMap(id){
+    var data = loadMapData(id);
+    if (!data) return false;
+    currentMapId = id;
+    state = data;
+    titleInput.value = state.title;
+    history = []; future = []; selected = { type:null, id:null };
+    render(); fitToView();
+    localStorage.setItem(LAST_MAP_KEY, id);
+    return true;
+  }
+
+  function createNewMap(){
+    currentMapId = genMapId();
+    state = emptyState();
+    titleInput.value = state.title;
+    history = []; future = []; selected = { type:null, id:null };
+    render(); fitToView(); pushHistory();
+  }
+
+  function deleteMap(id){
+    var index = loadMapsIndex().filter(function(m){ return m.id !== id; });
+    saveMapsIndex(index);
+    try { localStorage.removeItem(mapDataKey(id)); } catch(e){}
+    if (id === currentMapId){
+      if (index.length){ openMap(index[0].id); }
+      else { createNewMap(); }
+    }
+  }
+
+  /* 初回起動時: 一覧に地図があれば直前に開いていたものを、なければ新規地図を開く */
+  function loadInitialMap(){
+    migrateLegacyIfNeeded();
+    var index = loadMapsIndex();
+    var lastId = HAS_STORAGE ? localStorage.getItem(LAST_MAP_KEY) : null;
+    if (lastId && index.some(function(m){ return m.id === lastId; }) && openMap(lastId)) return;
+    if (index.length && openMap(index[0].id)) return;
+    createNewMap();
+  }
+
+  /* ---- 地図一覧モーダル ---- */
+  function openMapsModal(){
+    document.getElementById('mapsModal').style.display = 'flex';
+    renderMapsList();
+  }
+  function closeMapsModal(){
+    document.getElementById('mapsModal').style.display = 'none';
+  }
+  function renderMapsList(){
+    var listEl = document.getElementById('mapsList');
+    var index = loadMapsIndex().slice().sort(function(a,b){ return (b.updatedAt||'').localeCompare(a.updatedAt||''); });
+    if (!index.length){ listEl.textContent = '保存された地図はまだありません。'; return; }
+    listEl.innerHTML = '';
+    index.forEach(function(m){
+      var row = document.createElement('div');
+      row.className = 'map-row';
+
+      var infoWrap = document.createElement('div');
+      var nameEl = document.createElement('div');
+      nameEl.className = 'name' + (m.id === currentMapId ? ' current' : '');
+      nameEl.textContent = m.title || '無題の地図';
+      nameEl.title = 'クリックして名前を変更';
+      nameEl.addEventListener('click', function(){
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.value = m.title || '無題の地図';
+        input.style.fontSize = '13px'; input.style.width = '100%';
+        input.style.border = '1px solid #9fb8ea'; input.style.borderRadius = '4px'; input.style.padding = '2px 4px';
+        var finish = function(){
+          var newTitle = input.value.trim() || '無題の地図';
+          input.replaceWith(nameEl);
+          if (newTitle === m.title) return;
+          m.title = newTitle;
+          var idx = loadMapsIndex();
+          var entry = idx.find(function(x){ return x.id === m.id; });
+          if (entry){ entry.title = newTitle; saveMapsIndex(idx); }
+          nameEl.textContent = newTitle;
+          if (m.id === currentMapId){ state.title = newTitle; titleInput.value = newTitle; pushHistory(); }
+          else {
+            var data = loadMapData(m.id);
+            if (data){ data.title = newTitle; try { localStorage.setItem(mapDataKey(m.id), JSON.stringify(data)); } catch(e){} }
+          }
+        };
+        input.addEventListener('blur', finish);
+        input.addEventListener('keydown', function(e){
+          if (e.key === 'Enter'){ input.blur(); }
+          else if (e.key === 'Escape'){ input.value = m.title || '無題の地図'; input.blur(); }
+        });
+        nameEl.replaceWith(input);
+        input.focus(); input.select();
+      });
+
+      var metaEl = document.createElement('div');
+      metaEl.className = 'meta';
+      var d = m.updatedAt ? new Date(m.updatedAt) : null;
+      metaEl.textContent = d ? (d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+' '+d.getHours()+':'+String(d.getMinutes()).padStart(2,'0')) : '';
+
+      infoWrap.appendChild(nameEl);
+      infoWrap.appendChild(metaEl);
+      row.appendChild(infoWrap);
+
+      var openBtn = document.createElement('button');
+      openBtn.textContent = m.id === currentMapId ? '開いています' : '開く';
+      openBtn.disabled = (m.id === currentMapId);
+      openBtn.addEventListener('click', function(){ closeMapsModal(); openMap(m.id); });
+      row.appendChild(openBtn);
+
+      var delBtn = document.createElement('button');
+      delBtn.textContent = '削除';
+      delBtn.style.color = '#a02050'; delBtn.style.borderColor = '#e3a1b8';
+      delBtn.addEventListener('click', function(){
+        if (!confirm('「' + (m.title || '無題の地図') + '」を削除しますか？この操作は取り消せません。')) return;
+        deleteMap(m.id);
+        renderMapsList();
+      });
+      row.appendChild(delBtn);
+
+      listEl.appendChild(row);
+    });
   }
 
   /* ---- OpenAlex連携(DOI自動取得・研究種別判定・自動リンク) ---- */
@@ -906,12 +1084,10 @@
   titleInput.addEventListener('blur', function(){ pushHistory(); });
 
   document.getElementById('btn-new').addEventListener('click', function(){
-    if (!confirm('今の地図を消して新規作成しますか？(自動保存されている内容は上書きされます)')) return;
-    state = emptyState();
-    titleInput.value = state.title;
-    history = []; future = []; selected = {type:null,id:null};
-    render(); fitToView(); pushHistory();
+    createNewMap();
   });
+  document.getElementById('btn-maps').addEventListener('click', openMapsModal);
+  document.getElementById('btn-close-maps').addEventListener('click', closeMapsModal);
 
   document.getElementById('btn-export-json').addEventListener('click', function(){
     var payload = Object.assign({}, state, { exportedAt: new Date().toISOString() });
@@ -933,6 +1109,8 @@
       try {
         var loaded = JSON.parse(reader.result);
         if (!loaded || !Array.isArray(loaded.nodes)) throw new Error('形式が違います');
+        // 読み込んだ内容は、今の地図を上書きせず新しい地図として一覧に追加する
+        currentMapId = genMapId();
         state = { title: loaded.title || '無題の地図', nodes: loaded.nodes || [], edges: loaded.edges || [], nextId: loaded.nextId || (loaded.nodes.length + loaded.edges.length + 1) };
         titleInput.value = state.title;
         history = []; future = []; selected = {type:null,id:null};
@@ -946,11 +1124,7 @@
   });
 
   /* ---- 起動 ---- */
-  if (loadFromStorage()){
-    titleInput.value = state.title;
-  }
-  render();
-  fitToView();
+  loadInitialMap();
 })();
 </script>
 </body>
