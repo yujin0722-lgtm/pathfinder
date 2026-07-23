@@ -1172,19 +1172,14 @@
     try { raw = localStorage.getItem(PF_HANDOFF_KEY); } catch(e){ return; }
     if (!raw) return;
     try { localStorage.removeItem(PF_HANDOFF_KEY); } catch(e){}
-    var papers;
-    try { papers = JSON.parse(raw); } catch(e){ papers = null; }
-    if (!papers || !Array.isArray(papers) || !papers.length) return;
+    var payload;
+    try { payload = JSON.parse(raw); } catch(e){ payload = null; }
+    if (!payload || !Array.isArray(payload.papers) || !payload.papers.length) return;
 
-    if (state.nodes.length > 0){
-      var addToCurrent = confirm(
-        'Citrailから' + papers.length + '件の論文が届きました。\n\n' +
-        '「OK」を押すと今の地図に追加します。\n' +
-        '「キャンセル」を押すと新しい地図を作ってそこに追加します。'
-      );
-      if (!addToCurrent) createNewMap();
-    }
-    importPapersFromCitrail(papers);
+    // Citrail側で送り先の地図が指定されているので、確認ダイアログは出さずそのまま従う
+    var opened = payload.targetMapId ? openMap(payload.targetMapId) : false;
+    if (!opened) createNewMap();
+    importPapersFromCitrail(payload.papers);
   }
 
   /* ---- 起動 ---- */
