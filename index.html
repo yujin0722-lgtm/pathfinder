@@ -5,57 +5,72 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>パスファインダー</title>
 <style>
+  /* Citrailと同系統だが、差し色(--accent)だけ変えた配色。派生アプリと分かるようにするため。 */
+  :root {
+    --canvas: #F3F6F8; --panel: #FFFFFF; --ink: #1C2B33; --sub: #5B6B77;
+    --line: #DDE5EA; --accent: #1B5FA6; --accent-soft: #E4EDF7;
+  }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; height: 100%; font-family: "Hiragino Kaku Gothic ProN","Meiryo",sans-serif; color: #222; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: "Hiragino Kaku Gothic ProN","Meiryo",sans-serif; color: var(--ink); }
   #app { display: flex; flex-direction: column; height: 100vh; }
 
-  #topbar { flex: none; min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid #ddd; background: #fff; overflow-x: auto; overflow-y: hidden; }
+  #topbar { flex: none; min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); overflow-x: auto; overflow-y: hidden; }
   #topbar > * { flex-shrink: 0; }
-  #topbar input#title { font-size: 15px; font-weight: 500; border: 1px solid transparent; padding: 6px 8px; border-radius: 6px; width: 220px; }
-  #topbar input#title:hover, #topbar input#title:focus { border-color: #ccc; outline: none; }
+  #header-question { font-size: 14.5px; font-weight: 600; color: var(--ink); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; padding: 6px 10px; border-radius: 6px; }
+  #header-question:hover { background: var(--accent-soft); color: var(--accent); }
+  #header-question.placeholder { color: var(--sub); font-weight: 400; font-style: italic; }
   #topbar .spacer { flex: 1; min-width: 8px; }
-  #topbar button { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
-  #topbar button:hover { background: #f2f2f2; }
-  #topbar button:disabled { opacity: 0.35; cursor: not-allowed; background: #eee; color: #999; }
+  #topbar button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  #topbar button:hover { border-color: var(--accent); color: var(--accent); }
+  #topbar button:disabled { opacity: 0.35; cursor: not-allowed; }
   #savenote { font-size: 12px; color: #1a7a3c; background: #eafff0; border: 1px solid #b7ecc6; padding: 4px 10px; border-radius: 6px; }
 
   #main { flex: 1; display: flex; min-height: 0; }
 
-  #toolbar { width: 84px; border-right: 1px solid #ddd; background: #fafafa; display: flex; flex-direction: column; align-items: stretch; padding: 10px 6px; gap: 4px; overflow-y: auto; }
-  #toolbar button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px; border: 1px solid transparent; background: transparent; border-radius: 8px; cursor: pointer; font-size: 11px; color: #333; }
-  #toolbar button:hover { background: #eee; }
-  #toolbar button.active { background: #e2ecff; border-color: #9fb8ea; color: #1a4b9c; }
-  #toolbar button:disabled { opacity: 0.3; cursor: not-allowed; background: #eee; color: #999; }
+  #toolbar { width: 84px; border-right: 1px solid var(--line); background: var(--canvas); display: flex; flex-direction: column; align-items: stretch; padding: 10px 6px; gap: 4px; overflow-y: auto; }
+  #toolbar button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px; border: 1px solid transparent; background: transparent; border-radius: 8px; cursor: pointer; font-size: 11px; color: var(--ink); }
+  #toolbar button:hover { background: var(--accent-soft); }
+  #toolbar button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  #toolbar button:disabled { opacity: 0.3; cursor: not-allowed; background: transparent; }
   #toolbar button .ic { font-size: 18px; line-height: 1; }
-  #toolbar hr { width: 100%; border: none; border-top: 1px solid #ddd; margin: 4px 0; }
+  #toolbar hr { width: 100%; border: none; border-top: 1px solid var(--line); margin: 4px 0; }
 
-  #canvas-wrap { flex: 1; position: relative; background: #f4f5f7; overflow: hidden; }
+  #canvas-wrap { flex: 1; position: relative; background: var(--canvas); overflow: hidden; }
   svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; }
   svg#canvas.mode-add cursor: copy;
   svg#canvas.mode-add-paper, svg#canvas.mode-add-question, svg#canvas.mode-add-conclusion, svg#canvas.mode-add-memo { cursor: copy; }
   svg#canvas.mode-add-edge { cursor: crosshair; }
   svg#canvas.mode-pan { cursor: grab; }
 
+  /* グリッド背景: ノード・リンクより必ず後ろに描画され、クリックも一切奪わないようにする */
+  #gridBg { pointer-events: none; display: none; }
+  #gridBg.visible { display: block; }
+
   .node-shape { stroke: #666; stroke-width: 1.3; cursor: move; }
-  .node-shape.selected { stroke: #1a6bd6; stroke-width: 2.6; }
+  .node-shape.selected { stroke: var(--accent); stroke-width: 2.6; }
   .node-shape.type-question, .node-shape.type-conclusion { stroke-width: 2; }
   .node-shape.type-question.selected, .node-shape.type-conclusion.selected { stroke-width: 3; }
-  .node-label { font-size: 12px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: #222; }
-  .node-sub { font-size: 9px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: #777; }
+  .node-label { font-size: 12px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: var(--ink); }
+  .resize-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; cursor: nwse-resize; }
 
   .edge-path { fill: none; stroke-width: 2; cursor: pointer; }
   .edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
-  .edge-path.selected { stroke-width: 3; filter: drop-shadow(0 0 1px #1a6bd6); }
+  .edge-path.selected { stroke-width: 3; filter: drop-shadow(0 0 1px var(--accent)); }
   .edge-label-bg { fill: #fff; stroke: #ccc; stroke-width: 1; }
   .edge-label { font-size: 11px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
 
-  #hint { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,0.9); border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; font-size: 12px; color: #555; max-width: 360px; pointer-events: none; }
+  #hint { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,0.9); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 12px; color: var(--sub); max-width: 360px; pointer-events: none; }
 
-  #proppanel { width: 300px; border-left: 1px solid #ddd; background: #fff; padding: 14px; overflow-y: auto; }
-  #proppanel h3 { font-size: 13px; margin: 0 0 10px; color: #666; font-weight: 600; }
-  #proppanel .empty { font-size: 13px; color: #999; margin-top: 20px; }
-  #proppanel label { display: block; font-size: 12px; color: #666; margin: 12px 0 4px; }
-  #proppanel input[type=text], #proppanel textarea, #proppanel select { width: 100%; padding: 7px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; font-family: inherit; }
+  #proppanel-wrap { position: relative; flex: none; display: flex; }
+  #proppanel { width: 300px; border-left: 1px solid var(--line); background: var(--panel); padding: 14px; overflow-y: auto; transition: width .15s, padding .15s; }
+  #proppanel-wrap.collapsed #proppanel { width: 0; padding: 14px 0; overflow: hidden; border-left: none; }
+  #panel-toggle { position: absolute; top: 12px; left: -14px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--sub); cursor: pointer; font-size: 11px; line-height: 1; z-index: 5; }
+  #panel-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  #proppanel h3 { font-size: 13px; margin: 0 0 10px; color: var(--sub); font-weight: 600; }
+  #proppanel .empty { font-size: 13px; color: var(--sub); margin-top: 20px; }
+  #proppanel label { display: block; font-size: 12px; color: var(--sub); margin: 12px 0 4px; }
+  #proppanel input[type=text], #proppanel textarea, #proppanel select { width: 100%; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; font-family: inherit; }
+  #proppanel input:focus, #proppanel textarea:focus, #proppanel select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
   #proppanel textarea { resize: vertical; min-height: 56px; }
   #proppanel .row2 { display: flex; gap: 8px; }
   #proppanel .row2 > div { flex: 1; }
@@ -63,49 +78,61 @@
   #delbtn:hover { background: #ffe0ea; }
 
   .swatch-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 6px 0 4px; }
-  .swatch { width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; border: 1px solid #ccc; cursor: pointer; display: block; }
-  .swatch.selected { border: 2px solid #1a6bd6; box-shadow: 0 0 0 1px #1a6bd6 inset; }
+  .swatch { width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; display: block; }
+  .swatch.selected { border: 2px solid var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 
-  #statusbar { flex: none; height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid #ddd; font-size: 12px; color: #666; background: #fff; }
+  #statusbar { flex: none; height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--sub); background: var(--panel); }
 
-  #mapsModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); align-items: center; justify-content: center; z-index: 50; }
-  #mapsModal .box { background: #fff; border-radius: 10px; padding: 20px; width: 440px; max-height: 70vh; overflow-y: auto; }
+  #mapsModal { display: none; position: fixed; inset: 0; background: rgba(28,43,51,0.45); align-items: center; justify-content: center; z-index: 50; }
+  #mapsModal .box { background: var(--panel); border-radius: 10px; padding: 20px; width: 440px; max-height: 70vh; overflow-y: auto; }
   #mapsModal h3 { margin: 0 0 12px; font-size: 15px; }
-  .map-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #eee; gap: 10px; }
-  .map-row .meta { font-size: 12px; color: #999; }
-  .map-row .name { font-size: 13px; cursor: text; }
-  .map-row .name:hover { text-decoration: underline; color: #1a6bd6; }
+  .map-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); gap: 10px; }
+  .map-row .meta { font-size: 12px; color: var(--sub); }
+  .map-row .name { font-size: 13px; }
   .map-row .name.current { font-weight: 700; }
-  .map-row button { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .map-row button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+
+  /* 疑似フルスクリーン(Citrailと同じ方式): ヘッダー等を隠してキャンバスを広げる */
+  body.fullscreen #topbar, body.fullscreen #toolbar, body.fullscreen #statusbar { display: none; }
+  body.fullscreen #proppanel-wrap.collapsed #panel-toggle { display: none; }
+  /* 全画面表示ボタン自体がヘッダーごと隠れて抜け出せなくならないよう、
+     終了専用のボタンをキャンバス上に常に浮かせておく */
+  #btn-exit-fullscreen { display: none; position: fixed; top: 10px; right: 10px; z-index: 20; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+  #btn-exit-fullscreen:hover { border-color: var(--accent); color: var(--accent); }
+  body.fullscreen #btn-exit-fullscreen { display: block; }
 </style>
 </head>
 <body>
 <div id="app">
 
   <div id="topbar">
-    <input id="title" type="text" value="無題の地図" title="この地図の名前(臨床疑問の要約など)"/>
+    <div id="header-question" title="クリックすると臨床疑問ノードを編集できます">（臨床疑問未設定）</div>
     <button id="btn-new" title="新しい地図をこの一覧に追加して開く">新しい地図</button>
     <button id="btn-maps" title="保存されている地図の一覧を開く">地図一覧</button>
     <button id="btn-export-json" title="今の地図をJSONファイルとして書き出す">JSONで書き出し</button>
     <button id="btn-import-json" title="JSONファイルから読み込む">JSONを読み込む</button>
     <input type="file" id="import-json-input" accept="application/json,.json" style="display:none;">
+    <button id="btn-export-png" title="今の地図をPNG画像として書き出す">🖼 PNG保存</button>
     <button id="btn-apikey" title="OpenAlexのAPIキーを設定します(Citrailと共有されます)">APIキー設定</button>
     <div class="spacer"></div>
+    <button id="btn-fullscreen" title="ヘッダーとツールバーを隠して地図を広げます">⛶ 全画面表示</button>
     <span id="savenote">保存済み</span>
   </div>
 
   <div id="main">
     <div id="toolbar">
-      <button data-tool="select" class="active" title="選択"><span class="ic">&#9733;</span>選択</button>
-      <button data-tool="add-paper" title="論文ノードを追加"><span class="ic">&#128196;</span>論文</button>
+      <button data-tool="select" class="active" title="選択"><span class="ic">&#8598;</span>選択</button>
+      <button data-tool="add-paper" title="エビデンスノードを追加"><span class="ic">&#128196;</span>エビデンス</button>
       <button data-tool="add-question" id="btn-add-question" title="臨床疑問ノードを追加(地図に1つまで)"><span class="ic">&#10067;</span>疑問</button>
       <button data-tool="add-conclusion" id="btn-add-conclusion" title="自分の結論ノードを追加(地図に1つまで)"><span class="ic">&#9989;</span>結論</button>
       <button data-tool="add-memo" title="メモノートを追加"><span class="ic">&#128221;</span>メモ</button>
-      <button data-tool="add-edge" title="2つのノードを線でつなぐ"><span class="ic">&#8594;</span>線</button>
+      <button data-tool="add-edge" title="2つのノードを線でつなぐ"><span class="ic">&#128279;</span>線</button>
       <hr>
       <button id="btn-zoomin" title="拡大"><span class="ic">+</span>拡大</button>
       <button id="btn-zoomout" title="縮小"><span class="ic">-</span>縮小</button>
       <button id="btn-fit" title="全体が収まるように表示"><span class="ic">&#10530;</span>全体表示</button>
+      <button id="btn-grid" title="背景のグリッド線を表示/非表示"><span class="ic">&#9638;</span>グリッド</button>
+      <button id="btn-layout-year" title="発表年に基づいてエビデンスノードを整列します(発表年のないノードは動きません)"><span class="ic">&#128197;</span>年代整列</button>
       <hr>
       <button id="btn-undo" title="元に戻す"><span class="ic">&#8630;</span>戻す</button>
       <button id="btn-redo" title="やり直し"><span class="ic">&#8631;</span>進む</button>
@@ -117,8 +144,12 @@
           <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path>
           </marker>
+          <pattern id="gridPattern" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#DCE2E7" stroke-width="1"></path>
+          </pattern>
         </defs>
         <g id="viewport">
+          <rect id="gridBg" x="-6000" y="-6000" width="12000" height="12000" fill="url(#gridPattern)"></rect>
           <g id="edgeLayer"></g>
           <g id="nodeLayer"></g>
         </g>
@@ -126,7 +157,10 @@
       <div id="hint"></div>
     </div>
 
-    <div id="proppanel"></div>
+    <div id="proppanel-wrap">
+      <button id="panel-toggle" title="パネルの表示/非表示">▶</button>
+      <div id="proppanel"></div>
+    </div>
   </div>
 
   <div id="statusbar">
@@ -134,6 +168,8 @@
     <span id="stat-edges">リンク: 0</span>
     <span id="stat-zoom">ズーム: 100%</span>
   </div>
+
+  <button id="btn-exit-fullscreen" title="全画面表示を終了(Escキーでも終了できます)">✕ 全画面終了</button>
 
   <div id="mapsModal">
     <div class="box">
@@ -163,12 +199,35 @@
   var edgeLayer = document.getElementById('edgeLayer');
   var proppanel = document.getElementById('proppanel');
   var hintEl = document.getElementById('hint');
-  var titleInput = document.getElementById('title');
+  var headerQuestionEl = document.getElementById('header-question');
 
   function emptyState(){
     return { title: "無題の地図", nodes: [], edges: [], nextId: 1 };
   }
   var state = emptyState();
+
+  /* ---- ヘッダー表示(地図名の代わりに臨床疑問ノードの内容を表示する) ---- */
+  function getQuestionNode(){
+    return state.nodes.find(function(n){ return n.nodeType === 'question'; }) || null;
+  }
+  function syncTitleFromQuestion(){
+    var q = getQuestionNode();
+    state.title = (q && (q.text||'').trim()) ? q.text.trim() : '無題の地図';
+  }
+  function updateHeaderQuestion(){
+    var q = getQuestionNode();
+    if (q && (q.text||'').trim()){
+      headerQuestionEl.textContent = q.text.trim();
+      headerQuestionEl.classList.remove('placeholder');
+    } else {
+      headerQuestionEl.textContent = '（臨床疑問未設定）';
+      headerQuestionEl.classList.add('placeholder');
+    }
+  }
+  function refreshTitleDisplay(){
+    syncTitleFromQuestion();
+    updateHeaderQuestion();
+  }
 
   var view = { x: 0, y: 0, scale: 1 };
   var tool = 'select';
@@ -177,8 +236,10 @@
   var history = [];
   var future = [];
   var dragging = null;
+  var resizing = null;
   var isPanning = false;
   var panStart = null;
+  var MIN_NODE_WIDTH = 70, MIN_NODE_HEIGHT = 50;
 
   function newId(prefix){
     var id = prefix + '_' + state.nextId;
@@ -201,7 +262,7 @@
     if (!history.length) return;
     future.push(snapshot());
     state = JSON.parse(history.pop());
-    titleInput.value = state.title;
+    refreshTitleDisplay();
     selected = { type: null, id: null };
     render();
     autosave();
@@ -210,7 +271,7 @@
     if (!future.length) return;
     history.push(snapshot());
     state = JSON.parse(future.pop());
-    titleInput.value = state.title;
+    refreshTitleDisplay();
     selected = { type: null, id: null };
     render();
     autosave();
@@ -294,7 +355,7 @@
     if (!data) return false;
     currentMapId = id;
     state = data;
-    titleInput.value = state.title;
+    refreshTitleDisplay();
     history = []; future = []; selected = { type:null, id:null };
     render(); fitToView();
     localStorage.setItem(LAST_MAP_KEY, id);
@@ -304,7 +365,7 @@
   function createNewMap(){
     currentMapId = genMapId();
     state = emptyState();
-    titleInput.value = state.title;
+    refreshTitleDisplay();
     history = []; future = []; selected = { type:null, id:null };
     render(); fitToView(); pushHistory();
   }
@@ -350,36 +411,8 @@
       var nameEl = document.createElement('div');
       nameEl.className = 'name' + (m.id === currentMapId ? ' current' : '');
       nameEl.textContent = m.title || '無題の地図';
-      nameEl.title = 'クリックして名前を変更';
-      nameEl.addEventListener('click', function(){
-        var input = document.createElement('input');
-        input.type = 'text';
-        input.value = m.title || '無題の地図';
-        input.style.fontSize = '13px'; input.style.width = '100%';
-        input.style.border = '1px solid #9fb8ea'; input.style.borderRadius = '4px'; input.style.padding = '2px 4px';
-        var finish = function(){
-          var newTitle = input.value.trim() || '無題の地図';
-          input.replaceWith(nameEl);
-          if (newTitle === m.title) return;
-          m.title = newTitle;
-          var idx = loadMapsIndex();
-          var entry = idx.find(function(x){ return x.id === m.id; });
-          if (entry){ entry.title = newTitle; saveMapsIndex(idx); }
-          nameEl.textContent = newTitle;
-          if (m.id === currentMapId){ state.title = newTitle; titleInput.value = newTitle; pushHistory(); }
-          else {
-            var data = loadMapData(m.id);
-            if (data){ data.title = newTitle; try { localStorage.setItem(mapDataKey(m.id), JSON.stringify(data)); } catch(e){} }
-          }
-        };
-        input.addEventListener('blur', finish);
-        input.addEventListener('keydown', function(e){
-          if (e.key === 'Enter'){ input.blur(); }
-          else if (e.key === 'Escape'){ input.value = m.title || '無題の地図'; input.blur(); }
-        });
-        nameEl.replaceWith(input);
-        input.focus(); input.select();
-      });
+      nameEl.style.cursor = 'default';
+      nameEl.title = '地図の名前は臨床疑問ノードの内容から自動的に決まります';
 
       var metaEl = document.createElement('div');
       metaEl.className = 'meta';
@@ -502,12 +535,12 @@
 
   function apiErrorMessage(e){
     switch (e && e.code){
-      case 'notfound': return 'この論文がOpenAlexで見つかりませんでした。DOIが正しいか確認してください。';
+      case 'notfound': return 'このエビデンスがOpenAlexで見つかりませんでした。DOIが正しいか確認してください。';
       case 'auth': return 'APIキーが設定されていないか無効です。「APIキー設定」からOpenAlexの無料APIキーを登録してください。';
       case 'limit': return 'データ提供元(OpenAlex)の利用上限に達した可能性があります。時間を置いて再度お試しください。';
       case 'network': return '通信エラーが発生しました。インターネット接続を確認してください。';
       case 'badresponse': return 'データの形式に問題があり読み込めませんでした。';
-      default: return '論文情報を取得できませんでした。';
+      default: return 'エビデンスの情報を取得できませんでした。';
     }
   }
 
@@ -532,7 +565,7 @@
         recomputeAutoLinks();
         pushHistory();
         render();
-        alert('論文情報を取得しました:\n' + node.title);
+        alert('エビデンスの情報を取得しました:\n' + node.title);
       });
     }).catch(function(e){
       alert(apiErrorMessage(e));
@@ -571,7 +604,7 @@
       color: d.color
     };
     if (nodeType === 'paper'){
-      node.doi = ''; node.title = '新しい論文'; node.authors = ''; node.year = ''; node.journal = '';
+      node.doi = ''; node.title = '新しいエビデンス'; node.authors = ''; node.year = ''; node.journal = '';
       node.studyType = 'OTHER'; node.memo = '';
     } else if (nodeType === 'question'){
       node.text = '臨床疑問をここに書く';
@@ -587,7 +620,7 @@
     return state.nodes.some(function(n){ return n.nodeType === nodeType; });
   }
 
-  /* ---- 図形生成(論文ノードは研究種別で形が変わる) ---- */
+  /* ---- 図形生成(エビデンスノードは研究種別で形が変わる) ---- */
   function pointsToStr(pts){ return pts.map(function(p){ return p[0]+','+p[1]; }).join(' '); }
 
   // ノードの外枠(横長になりがち)の中に、見た目が整った形(正多角形に近い比率)を
@@ -643,15 +676,39 @@
   }
 
   function nodeLabelText(node){
-    if (node.nodeType === 'paper') return node.title || '(無題の論文)';
+    if (node.nodeType === 'paper') return node.title || '(無題のエビデンス)';
     return (node.text || '').split('\n')[0] || '(空)';
+  }
+
+  // 日本語は単語区切りがないため、ノードの大きさに応じて文字数ベースで折り返す
+  function wrapLabelLines(text, node){
+    text = String(text || '');
+    var charWidth = 7.2; // 12pxフォントでのおおよその1文字あたりの幅(px)
+    var maxCharsPerLine = Math.max(3, Math.floor((node.width - 14) / charWidth));
+    var maxLines = Math.max(1, Math.floor((node.height - 16) / 15));
+    var lines = [];
+    var i = 0;
+    while (i < text.length && lines.length < maxLines){
+      var remaining = text.length - i;
+      var take = Math.min(maxCharsPerLine, remaining);
+      var isLastAllowedLine = (lines.length === maxLines - 1);
+      if (isLastAllowedLine && remaining > take){
+        lines.push(text.slice(i, i + Math.max(1, take - 1)) + '…');
+      } else {
+        lines.push(text.slice(i, i + take));
+      }
+      i += take;
+    }
+    if (!lines.length) lines.push('');
+    return lines;
   }
 
   /* ---- 描画 ---- */
   function renderNode(node){
     var g = svgEl('g', { class: 'node-group', 'data-id': node.id });
+    var isSelected = (selected.type==='node' && selected.id===node.id);
     var shape = nodeShapeEl(node);
-    shape.setAttribute('class', 'node-shape type-' + node.nodeType + (selected.type==='node' && selected.id===node.id ? ' selected' : ''));
+    shape.setAttribute('class', 'node-shape type-' + node.nodeType + (isSelected ? ' selected' : ''));
     shape.setAttribute('fill', node.color || '#ffffff');
     g.appendChild(shape);
 
@@ -661,14 +718,27 @@
       g.appendChild(inner);
     }
 
-    var label = svgEl('text', { x: node.x+node.width/2, y: node.y+node.height/2, class: 'node-label' });
-    label.textContent = truncate(nodeLabelText(node), 16);
+    var cx = node.x + node.width/2, cy = node.y + node.height/2;
+    var lines = wrapLabelLines(nodeLabelText(node), node);
+    var lineHeight = 15;
+    var label = svgEl('text', { x: cx, y: cy, class: 'node-label' });
+    var startDy = -(lines.length-1) * lineHeight / 2;
+    lines.forEach(function(line, i){
+      var tspan = svgEl('tspan', { x: cx, dy: (i===0 ? startDy : lineHeight) });
+      tspan.textContent = line;
+      label.appendChild(tspan);
+    });
     g.appendChild(label);
 
-    if (node.nodeType === 'paper'){
-      var sub = svgEl('text', { x: node.x+node.width/2, y: node.y+node.height/2 + 16, class: 'node-sub' });
-      sub.textContent = STUDY_LABEL[node.studyType || 'OTHER'];
-      g.appendChild(sub);
+    if (isSelected){
+      var handleSize = 10;
+      var handle = svgEl('rect', {
+        x: node.x+node.width-handleSize/2, y: node.y+node.height-handleSize/2,
+        width: handleSize, height: handleSize, rx: 2, class: 'resize-handle'
+      });
+      handle.addEventListener('mousedown', function(evt){ onResizeHandleMouseDown(evt, node); });
+      handle.addEventListener('touchstart', function(evt){ onResizeHandleMouseDown(evt, node); }, {passive:false});
+      g.appendChild(handle);
     }
 
     g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
@@ -791,7 +861,7 @@
   }
 
   function renderNodePanel(node){
-    var html = '<h3>' + ({paper:'論文ノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'メモノート'}[node.nodeType]) + '</h3>';
+    var html = '<h3>' + ({paper:'エビデンスノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'メモノート'}[node.nodeType]) + '</h3>';
     if (node.nodeType === 'paper'){
       html += '<label>DOI(任意)</label><div style="display:flex;gap:6px;"><input type="text" id="f-doi" value="'+escAttr(node.doi)+'" style="flex:1;" placeholder="10.1001/xxxxx"><button id="f-doi-fetch" style="flex:none;" title="OpenAlexから書誌情報を取得">取得</button></div>';
       html += fieldRow('タイトル', '<input type="text" id="f-title" value="'+escAttr(node.title)+'">');
@@ -824,7 +894,11 @@
         node.studyType = this.value; pushHistory(); render();
       });
     } else {
-      wireInput('f-text', function(v){ node.text = v; renderQuiet(); });
+      wireInput('f-text', function(v){
+        node.text = v;
+        if (node.nodeType === 'question') refreshTitleDisplay();
+        renderQuiet();
+      });
     }
     document.getElementById('delbtn').addEventListener('click', function(){
       deleteNode(node.id); pushHistory(); render();
@@ -833,7 +907,7 @@
 
   function renderEdgePanel(edge){
     if (edge.auto){
-      proppanel.innerHTML = '<h3>自動リンク</h3><div class="empty" style="margin-top:0;">OpenAlexの引用関係に基づく事実のリンクです。論文ノードのDOIを再取得すると、内容に応じて自動的に更新されます。手動では編集・削除できません。</div>';
+      proppanel.innerHTML = '<h3>自動リンク</h3><div class="empty" style="margin-top:0;">OpenAlexの引用関係に基づく事実のリンクです。エビデンスノードのDOIを再取得すると、内容に応じて自動的に更新されます。手動では編集・削除できません。</div>';
       return;
     }
     var html = '<h3>リンク</h3>';
@@ -906,8 +980,10 @@
   }
 
   function deleteNode(id){
+    var wasQuestion = getNode(id) && getNode(id).nodeType === 'question';
     state.nodes = state.nodes.filter(function(n){ return n.id !== id; });
     state.edges = state.edges.filter(function(e){ return e.sourceNodeId !== id && e.targetNodeId !== id; });
+    if (wasQuestion) refreshTitleDisplay();
     selected = { type:null, id:null };
   }
   function deleteEdge(id){
@@ -935,7 +1011,7 @@
   function updateHint(){
     var msgs = {
       'select': '要素をクリックして選択・ドラッグで移動できます。背景をドラッグすると画面を動かせます。',
-      'add-paper': 'キャンバスをクリックすると論文ノードを追加します。',
+      'add-paper': 'キャンバスをクリックするとエビデンスノードを追加します。',
       'add-question': 'キャンバスをクリックすると臨床疑問ノードを追加します(地図に1つまで)。',
       'add-conclusion': 'キャンバスをクリックすると自分の結論ノードを追加します(地図に1つまで)。',
       'add-memo': 'キャンバスをクリックするとメモノートを追加します。',
@@ -984,6 +1060,112 @@
     applyViewTransform();
   }
 
+  /* 発表年に基づいてエビデンスノードを一度だけ整列する(常時動く物理演算ではない)。
+     発表年のないノード(臨床疑問・結論・メモ、年未入力のエビデンス)は対象外で今の位置のまま。
+     同じ年のノードは重ならないよう縦に並べる。 */
+  function layoutByYear(){
+    var dated = state.nodes.filter(function(n){
+      return n.nodeType === 'paper' && n.year && !isNaN(parseInt(n.year,10));
+    });
+    if (dated.length < 2){
+      alert('発表年が入力されているエビデンスノードが2件以上ないと整列できません。');
+      return;
+    }
+    var years = dated.map(function(n){ return parseInt(n.year,10); });
+    var minYear = Math.min.apply(null, years), maxYear = Math.max.apply(null, years);
+    var yearSpan = Math.max(maxYear - minYear, 1);
+    var totalWidth = Math.max(700, dated.length * 170);
+    var xScale = totalWidth / yearSpan;
+    var vGap = 150;
+
+    var groups = {};
+    dated.forEach(function(n){
+      var y = parseInt(n.year,10);
+      (groups[y] = groups[y] || []).push(n);
+    });
+    Object.keys(groups).forEach(function(yearKey){
+      var group = groups[yearKey];
+      var x = (parseInt(yearKey,10) - minYear) * xScale;
+      var startY = -((group.length-1) * vGap) / 2;
+      group.forEach(function(n, i){
+        n.x = x - n.width/2;
+        n.y = startY + i*vGap - n.height/2;
+      });
+    });
+    pushHistory();
+    render();
+    fitToView();
+  }
+
+  /* ---- PNG書き出し ---- */
+  function exportPng(){
+    var b = computeContentBounds();
+    if (!b){ alert('地図が空です。ノードを追加してから書き出してください。'); return; }
+    var padding = 60;
+    var w = (b.maxX - b.minX) + padding*2;
+    var h = (b.maxY - b.minY) + padding*2;
+    var svgNS = 'http://www.w3.org/2000/svg';
+
+    var exportSvg = document.createElementNS(svgNS, 'svg');
+    exportSvg.setAttribute('xmlns', svgNS);
+    exportSvg.setAttribute('width', w);
+    exportSvg.setAttribute('height', h);
+    exportSvg.setAttribute('viewBox', (b.minX-padding) + ' ' + (b.minY-padding) + ' ' + w + ' ' + h);
+
+    var defsClone = svg.querySelector('defs').cloneNode(true);
+    exportSvg.appendChild(defsClone);
+
+    var styleEl = document.createElementNS(svgNS, 'style');
+    styleEl.textContent =
+      '.node-shape{stroke:#666;stroke-width:1.3;}' +
+      '.node-shape.type-question,.node-shape.type-conclusion{stroke-width:2;}' +
+      '.node-label{font-size:12px;text-anchor:middle;dominant-baseline:middle;fill:#1C2B33;font-family:sans-serif;}' +
+      '.edge-path{fill:none;stroke-width:2;}' +
+      '.edge-label-bg{fill:#fff;stroke:#ccc;stroke-width:1;}' +
+      '.edge-label{font-size:11px;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}';
+    exportSvg.appendChild(styleEl);
+
+    var bg = svgEl('rect', { x:b.minX-padding, y:b.minY-padding, width:w, height:h, fill:'#ffffff' });
+    exportSvg.appendChild(bg);
+
+    var edgeClone = edgeLayer.cloneNode(true);
+    var nodeClone = nodeLayer.cloneNode(true);
+    edgeClone.querySelectorAll('.selected').forEach(function(el){ el.classList.remove('selected'); });
+    nodeClone.querySelectorAll('.selected').forEach(function(el){ el.classList.remove('selected'); });
+    nodeClone.querySelectorAll('.resize-handle').forEach(function(el){ el.remove(); });
+    nodeClone.querySelectorAll('.edge-hit').forEach(function(el){ el.remove(); });
+    edgeClone.querySelectorAll('.edge-hit').forEach(function(el){ el.remove(); });
+    exportSvg.appendChild(edgeClone);
+    exportSvg.appendChild(nodeClone);
+
+    var serializer = new XMLSerializer();
+    var svgString = serializer.serializeToString(exportSvg);
+    var svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    var url = URL.createObjectURL(svgBlob);
+
+    var img = new Image();
+    img.onload = function(){
+      var scale = 2;
+      var canvasEl = document.createElement('canvas');
+      canvasEl.width = w*scale; canvasEl.height = h*scale;
+      var ctx = canvasEl.getContext('2d');
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      canvasEl.toBlob(function(blob){
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = (state.title || 'pathfinder-map').replace(/[\\/:*?"<>|]/g,'_') + '.png';
+        document.body.appendChild(a); a.click(); a.remove();
+      });
+    };
+    img.onerror = function(){
+      URL.revokeObjectURL(url);
+      alert('PNGの書き出しに失敗しました。');
+    };
+    img.src = url;
+  }
+
   /* ---- マウス/タッチ操作 ---- */
   function onNodeMouseDown(evt, node){
     evt.preventDefault(); evt.stopPropagation();
@@ -1007,6 +1189,11 @@
     dragging = { id: node.id, offX: startWorld.x - node.x, offY: startWorld.y - node.y };
   }
 
+  function onResizeHandleMouseDown(evt, node){
+    evt.preventDefault(); evt.stopPropagation();
+    resizing = { id: node.id };
+  }
+
   svg.addEventListener('mousedown', function(evt){
     if (evt.target !== svg && evt.target !== viewport && evt.target.id !== 'canvas') return;
     if (tool.indexOf('add-') === 0 && tool !== 'add-edge'){
@@ -1015,6 +1202,7 @@
       var w = screenToWorld(evt);
       var node = createNode(nodeType, w.x, w.y);
       state.nodes.push(node);
+      if (nodeType === 'question') refreshTitleDisplay();
       pushHistory();
       setTool('select');
       selectItem('node', node.id);
@@ -1032,6 +1220,14 @@
       var w = screenToWorld(evt);
       var node = getNode(dragging.id);
       if (node){ node.x = w.x - dragging.offX; node.y = w.y - dragging.offY; renderQuiet(); }
+    } else if (resizing){
+      var w2 = screenToWorld(evt);
+      var rnode = getNode(resizing.id);
+      if (rnode){
+        rnode.width = Math.max(MIN_NODE_WIDTH, w2.x - rnode.x);
+        rnode.height = Math.max(MIN_NODE_HEIGHT, w2.y - rnode.y);
+        renderQuiet();
+      }
     } else if (isPanning && panStart){
       view.x = eventPoint(evt).clientX - panStart.x;
       view.y = eventPoint(evt).clientY - panStart.y;
@@ -1040,6 +1236,7 @@
   });
   window.addEventListener('mouseup', function(){
     if (dragging){ dragging = null; pushHistory(); render(); }
+    if (resizing){ resizing = null; pushHistory(); render(); }
     isPanning = false; panStart = null;
   });
 
@@ -1071,8 +1268,47 @@
   document.getElementById('btn-zoomin').addEventListener('click', function(){ view.scale=Math.min(view.scale*1.2,4); applyViewTransform(); });
   document.getElementById('btn-zoomout').addEventListener('click', function(){ view.scale=Math.max(view.scale*0.8,0.1); applyViewTransform(); });
   document.getElementById('btn-fit').addEventListener('click', fitToView);
+  document.getElementById('btn-layout-year').addEventListener('click', layoutByYear);
   document.getElementById('btn-undo').addEventListener('click', undo);
   document.getElementById('btn-redo').addEventListener('click', redo);
+
+  /* ---- グリッド表示切替(常にノード・リンクより後ろ、クリックも奪わない) ---- */
+  var GRID_PREF_KEY = 'pf_grid_visible';
+  var gridBgEl = document.getElementById('gridBg');
+  var gridVisible = false;
+  try { gridVisible = HAS_STORAGE && localStorage.getItem(GRID_PREF_KEY) === '1'; } catch(e){}
+  function applyGridVisibility(){
+    gridBgEl.classList.toggle('visible', gridVisible);
+    document.getElementById('btn-grid').classList.toggle('active', gridVisible);
+  }
+  document.getElementById('btn-grid').addEventListener('click', function(){
+    gridVisible = !gridVisible;
+    applyGridVisibility();
+    try { if (HAS_STORAGE) localStorage.setItem(GRID_PREF_KEY, gridVisible ? '1' : '0'); } catch(e){}
+  });
+  applyGridVisibility();
+
+  /* ---- プロパティパネルの開閉 ---- */
+  var panelWrapEl = document.getElementById('proppanel-wrap');
+  document.getElementById('panel-toggle').addEventListener('click', function(){
+    var collapsed = panelWrapEl.classList.toggle('collapsed');
+    document.getElementById('panel-toggle').textContent = collapsed ? '◀' : '▶';
+  });
+
+  /* ---- 全画面表示(Citrailと同じ、CSSでヘッダー等を隠す疑似フルスクリーン) ---- */
+  /* ヘッダーごと隠れる全画面表示ボタンとは別に、抜け出すための専用ボタン(常にキャンバス上に浮く)と
+     Escキーの両方を用意し、全画面から戻れなくなることを防ぐ */
+  document.getElementById('btn-fullscreen').addEventListener('click', function(){
+    document.body.classList.add('fullscreen');
+  });
+  document.getElementById('btn-exit-fullscreen').addEventListener('click', function(){
+    document.body.classList.remove('fullscreen');
+  });
+  document.addEventListener('keydown', function(evt){
+    if (evt.key === 'Escape' && document.body.classList.contains('fullscreen')){
+      document.body.classList.remove('fullscreen');
+    }
+  });
 
   document.getElementById('btn-apikey').addEventListener('click', function(){
     var cur = getApiKey();
@@ -1080,8 +1316,11 @@
     if (v !== null) saveApiKey(v);
   });
 
-  titleInput.addEventListener('input', function(){ state.title = titleInput.value; });
-  titleInput.addEventListener('blur', function(){ pushHistory(); });
+  headerQuestionEl.addEventListener('click', function(){
+    var q = getQuestionNode();
+    if (q) selectItem('node', q.id);
+    else alert('この地図にはまだ臨床疑問ノードがありません。左のツールバーの「疑問」から追加してください。');
+  });
 
   document.getElementById('btn-new').addEventListener('click', function(){
     createNewMap();
@@ -1098,6 +1337,8 @@
     document.body.appendChild(a); a.click(); a.remove();
   });
 
+  document.getElementById('btn-export-png').addEventListener('click', exportPng);
+
   document.getElementById('btn-import-json').addEventListener('click', function(){
     document.getElementById('import-json-input').click();
   });
@@ -1112,7 +1353,7 @@
         // 読み込んだ内容は、今の地図を上書きせず新しい地図として一覧に追加する
         currentMapId = genMapId();
         state = { title: loaded.title || '無題の地図', nodes: loaded.nodes || [], edges: loaded.edges || [], nextId: loaded.nextId || (loaded.nodes.length + loaded.edges.length + 1) };
-        titleInput.value = state.title;
+        refreshTitleDisplay();
         history = []; future = []; selected = {type:null,id:null};
         render(); fitToView(); pushHistory();
       } catch(e){
@@ -1126,7 +1367,7 @@
   /* ---- Citrailからの受け取り(Local Storage経由) ---- */
   var PF_HANDOFF_KEY = 'chm_to_pathfinder';
 
-  /* 既にこの地図にある論文ノードと同じ論文か(DOI・PMID・OpenAlex IDのいずれか一致で判定) */
+  /* 既にこの地図にあるエビデンスノードと同じ内容か(DOI・PMID・OpenAlex IDのいずれか一致で判定) */
   function findExistingPaperNode(cp){
     var doi = (cp.doi || '').trim().toLowerCase();
     var pmid = (cp.pmid || '').trim();
@@ -1162,7 +1403,7 @@
     render();
     fitToView();
     if (skipped > 0){
-      alert(added + '件を追加しました。' + skipped + '件はすでにこの地図にある論文と同じ(DOI・PMID・OpenAlex IDが一致)ため、重複して追加しませんでした。');
+      alert(added + '件を追加しました。' + skipped + '件はすでにこの地図にあるエビデンスと同じ(DOI・PMID・OpenAlex IDが一致)ため、重複して追加しませんでした。');
     }
   }
 
