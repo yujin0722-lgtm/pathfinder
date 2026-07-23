@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>パスファインダー</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: "Hiragino Kaku Gothic ProN","Meiryo",sans-serif; color: #222; }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  #topbar { flex: none; min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid #ddd; background: #fff; overflow-x: auto; overflow-y: hidden; }
+  #topbar > * { flex-shrink: 0; }
+  #topbar input#title { font-size: 15px; font-weight: 500; border: 1px solid transparent; padding: 6px 8px; border-radius: 6px; width: 220px; }
+  #topbar input#title:hover, #topbar input#title:focus { border-color: #ccc; outline: none; }
+  #topbar .spacer { flex: 1; min-width: 8px; }
+  #topbar button { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  #topbar button:hover { background: #f2f2f2; }
+  #topbar button:disabled { opacity: 0.35; cursor: not-allowed; background: #eee; color: #999; }
+  #savenote { font-size: 12px; color: #1a7a3c; background: #eafff0; border: 1px solid #b7ecc6; padding: 4px 10px; border-radius: 6px; }
+
+  #main { flex: 1; display: flex; min-height: 0; }
+
+  #toolbar { width: 84px; border-right: 1px solid #ddd; background: #fafafa; display: flex; flex-direction: column; align-items: stretch; padding: 10px 6px; gap: 4px; overflow-y: auto; }
+  #toolbar button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px; border: 1px solid transparent; background: transparent; border-radius: 8px; cursor: pointer; font-size: 11px; color: #333; }
+  #toolbar button:hover { background: #eee; }
+  #toolbar button.active { background: #e2ecff; border-color: #9fb8ea; color: #1a4b9c; }
+  #toolbar button:disabled { opacity: 0.3; cursor: not-allowed; background: #eee; color: #999; }
+  #toolbar button .ic { font-size: 18px; line-height: 1; }
+  #toolbar hr { width: 100%; border: none; border-top: 1px solid #ddd; margin: 4px 0; }
+
+  #canvas-wrap { flex: 1; position: relative; background: #f4f5f7; overflow: hidden; }
+  svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  svg#canvas.mode-add cursor: copy;
+  svg#canvas.mode-add-paper, svg#canvas.mode-add-question, svg#canvas.mode-add-conclusion, svg#canvas.mode-add-memo { cursor: copy; }
+  svg#canvas.mode-add-edge { cursor: crosshair; }
+  svg#canvas.mode-pan { cursor: grab; }
+
+  .node-shape { stroke: #666; stroke-width: 1.3; cursor: move; }
+  .node-shape.selected { stroke: #1a6bd6; stroke-width: 2.6; }
+  .node-shape.type-question, .node-shape.type-conclusion { stroke-width: 2; }
+  .node-shape.type-question.selected, .node-shape.type-conclusion.selected { stroke-width: 3; }
+  .node-label { font-size: 12px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: #222; }
+  .node-sub { font-size: 9px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: #777; }
+
+  .edge-path { fill: none; stroke-width: 2; cursor: pointer; }
+  .edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+  .edge-path.selected { stroke-width: 3; filter: drop-shadow(0 0 1px #1a6bd6); }
+  .edge-label-bg { fill: #fff; stroke: #ccc; stroke-width: 1; }
+  .edge-label { font-size: 11px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+
+  #hint { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,0.9); border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; font-size: 12px; color: #555; max-width: 360px; pointer-events: none; }
+
+  #proppanel { width: 300px; border-left: 1px solid #ddd; background: #fff; padding: 14px; overflow-y: auto; }
+  #proppanel h3 { font-size: 13px; margin: 0 0 10px; color: #666; font-weight: 600; }
+  #proppanel .empty { font-size: 13px; color: #999; margin-top: 20px; }
+  #proppanel label { display: block; font-size: 12px; color: #666; margin: 12px 0 4px; }
+  #proppanel input[type=text], #proppanel textarea, #proppanel select { width: 100%; padding: 7px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; font-family: inherit; }
+  #proppanel textarea { resize: vertical; min-height: 56px; }
+  #proppanel .row2 { display: flex; gap: 8px; }
+  #proppanel .row2 > div { flex: 1; }
+  #delbtn { margin-top: 18px; width: 100%; padding: 8px; border: 1px solid #e3a; background: #fff0f5; color: #a02050; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #delbtn:hover { background: #ffe0ea; }
+
+  .swatch-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 6px 0 4px; }
+  .swatch { width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; border: 1px solid #ccc; cursor: pointer; display: block; }
+  .swatch.selected { border: 2px solid #1a6bd6; box-shadow: 0 0 0 1px #1a6bd6 inset; }
+
+  #statusbar { flex: none; height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid #ddd; font-size: 12px; color: #666; background: #fff; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="topbar">
+    <input id="title" type="text" value="無題の地図" title="この地図の名前(臨床疑問の要約など)"/>
+    <button id="btn-new">新規作成</button>
+    <button id="btn-export-json" title="今の地図をJSONファイルとして書き出す">JSONで書き出し</button>
+    <button id="btn-import-json" title="JSONファイルから読み込む">JSONを読み込む</button>
+    <input type="file" id="import-json-input" accept="application/json,.json" style="display:none;">
+    <div class="spacer"></div>
+    <span id="savenote">保存済み</span>
+  </div>
+
+  <div id="main">
+    <div id="toolbar">
+      <button data-tool="select" class="active" title="選択"><span class="ic">&#9733;</span>選択</button>
+      <button data-tool="add-paper" title="論文ノードを追加"><span class="ic">&#128196;</span>論文</button>
+      <button data-tool="add-question" id="btn-add-question" title="臨床疑問ノードを追加(地図に1つまで)"><span class="ic">&#10067;</span>疑問</button>
+      <button data-tool="add-conclusion" id="btn-add-conclusion" title="自分の結論ノードを追加(地図に1つまで)"><span class="ic">&#9989;</span>結論</button>
+      <button data-tool="add-memo" title="メモノートを追加"><span class="ic">&#128221;</span>メモ</button>
+      <button data-tool="add-edge" title="2つのノードを線でつなぐ"><span class="ic">&#8594;</span>線</button>
+      <hr>
+      <button id="btn-zoomin" title="拡大"><span class="ic">+</span>拡大</button>
+      <button id="btn-zoomout" title="縮小"><span class="ic">-</span>縮小</button>
+      <button id="btn-fit" title="全体が収まるように表示"><span class="ic">&#10530;</span>全体表示</button>
+      <hr>
+      <button id="btn-undo" title="元に戻す"><span class="ic">&#8630;</span>戻す</button>
+      <button id="btn-redo" title="やり直し"><span class="ic">&#8631;</span>進む</button>
+    </div>
+
+    <div id="canvas-wrap">
+      <svg id="canvas">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path>
+          </marker>
+        </defs>
+        <g id="viewport">
+          <g id="edgeLayer"></g>
+          <g id="nodeLayer"></g>
+        </g>
+      </svg>
+      <div id="hint"></div>
+    </div>
+
+    <div id="proppanel"></div>
+  </div>
+
+  <div id="statusbar">
+    <span id="stat-nodes">ノード: 0</span>
+    <span id="stat-edges">リンク: 0</span>
+    <span id="stat-zoom">ズーム: 100%</span>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var STORAGE_KEY = "pf_current_map";
+
+  var STUDY_TYPES = ["RCT","META","REVIEW","OBS","GUIDE","CASE","OTHER"];
+  var STUDY_LABEL = { RCT: "RCT", META: "メタ解析・SR", REVIEW: "レビュー", OBS: "観察研究", GUIDE: "ガイドライン", CASE: "症例報告", OTHER: "その他・未定" };
+
+  var EDGE_CATEGORIES = ["support","oppose","supplement","free"];
+  var EDGE_CATEGORY_LABEL = { support: "支持する", oppose: "反論する", supplement: "補足する", free: "分類なし(自由記述)" };
+  var EDGE_CATEGORY_DEFAULT_COLOR = { support: "#2e7d32", oppose: "#c62828", supplement: "#546e7a", free: "#8d6e63" };
+  var EDGE_COLOR_PRESETS = ["#2e7d32","#c62828","#546e7a","#8d6e63","#1565c0","#6a1b9a"];
+
+  var svg = document.getElementById('canvas');
+  var viewport = document.getElementById('viewport');
+  var nodeLayer = document.getElementById('nodeLayer');
+  var edgeLayer = document.getElementById('edgeLayer');
+  var proppanel = document.getElementById('proppanel');
+  var hintEl = document.getElementById('hint');
+  var titleInput = document.getElementById('title');
+
+  function emptyState(){
+    return { title: "無題の地図", nodes: [], edges: [], nextId: 1 };
+  }
+  var state = emptyState();
+
+  var view = { x: 0, y: 0, scale: 1 };
+  var tool = 'select';
+  var selected = { type: null, id: null };
+  var edgeDraftSource = null;
+  var history = [];
+  var future = [];
+  var dragging = null;
+  var isPanning = false;
+  var panStart = null;
+
+  function newId(prefix){
+    var id = prefix + '_' + state.nextId;
+    state.nextId += 1;
+    return id;
+  }
+
+  function getNode(id){ for (var i=0;i<state.nodes.length;i++) if (state.nodes[i].id===id) return state.nodes[i]; return null; }
+  function getEdge(id){ for (var i=0;i<state.edges.length;i++) if (state.edges[i].id===id) return state.edges[i]; return null; }
+
+  /* ---- 履歴(元に戻す/やり直し) ---- */
+  function snapshot(){ return JSON.stringify(state); }
+  function pushHistory(){
+    history.push(snapshot());
+    if (history.length > 60) history.shift();
+    future = [];
+    autosave();
+  }
+  function undo(){
+    if (!history.length) return;
+    future.push(snapshot());
+    state = JSON.parse(history.pop());
+    titleInput.value = state.title;
+    selected = { type: null, id: null };
+    render();
+    autosave();
+  }
+  function redo(){
+    if (!future.length) return;
+    history.push(snapshot());
+    state = JSON.parse(future.pop());
+    titleInput.value = state.title;
+    selected = { type: null, id: null };
+    render();
+    autosave();
+  }
+
+  /* ---- Local Storage 自動保存 ---- */
+  function storageAvailable(){
+    try { localStorage.setItem('__pf_test','1'); localStorage.removeItem('__pf_test'); return true; } catch(e){ return false; }
+  }
+  var HAS_STORAGE = storageAvailable();
+  var saveTimer = null;
+  function autosave(){
+    if (!HAS_STORAGE) return;
+    var note = document.getElementById('savenote');
+    note.textContent = '保存中…';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        var t = new Date();
+        note.textContent = '保存済み(' + t.getHours() + ':' + String(t.getMinutes()).padStart(2,'0') + ')';
+      } catch(e){
+        note.textContent = '保存に失敗しました';
+      }
+    }, 500);
+  }
+  function loadFromStorage(){
+    if (!HAS_STORAGE) return false;
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return false;
+      var loaded = JSON.parse(raw);
+      if (!loaded || !Array.isArray(loaded.nodes)) return false;
+      state = loaded;
+      return true;
+    } catch(e){ return false; }
+  }
+
+  /* ---- ノード種類ごとの既定サイズ・色 ---- */
+  var NODE_DEFAULTS = {
+    paper:      { width: 150, height: 74, color: '#ffffff' },
+    question:   { width: 170, height: 84, color: '#cfe9fb' },
+    conclusion: { width: 170, height: 84, color: '#d7f0d8' },
+    memo:       { width: 140, height: 74, color: '#fff4c2' }
+  };
+
+  function createNode(nodeType, x, y){
+    var d = NODE_DEFAULTS[nodeType];
+    var node = {
+      id: newId('node'),
+      nodeType: nodeType,
+      x: x - d.width/2, y: y - d.height/2, width: d.width, height: d.height,
+      color: d.color
+    };
+    if (nodeType === 'paper'){
+      node.doi = ''; node.title = '新しい論文'; node.authors = ''; node.year = ''; node.journal = '';
+      node.studyType = 'OTHER'; node.memo = '';
+    } else if (nodeType === 'question'){
+      node.text = '臨床疑問をここに書く';
+    } else if (nodeType === 'conclusion'){
+      node.text = '自分の結論をここに書く';
+    } else if (nodeType === 'memo'){
+      node.text = 'メモ';
+    }
+    return node;
+  }
+
+  function hasNodeOfType(nodeType){
+    return state.nodes.some(function(n){ return n.nodeType === nodeType; });
+  }
+
+  /* ---- 図形生成(論文ノードは研究種別で形が変わる) ---- */
+  function pointsToStr(pts){ return pts.map(function(p){ return p[0]+','+p[1]; }).join(' '); }
+
+  function rectPoints(x,y,w,h){ return [[x,y],[x+w,y],[x+w,y+h],[x,y+h]]; }
+  function diamondPoints(x,y,w,h){ return [[x+w/2,y],[x+w,y+h/2],[x+w/2,y+h],[x,y+h/2]]; }
+  function hexagonPoints(x,y,w,h){ var q=w*0.25; return [[x+q,y],[x+w-q,y],[x+w,y+h/2],[x+w-q,y+h],[x+q,y+h],[x,y+h/2]]; }
+  function trianglePoints(x,y,w,h){ return [[x+w/2,y],[x+w,y+h],[x,y+h]]; }
+  function tagPoints(x,y,w,h){ var n=w*0.16; return [[x,y+h*0.12],[x+w-n,y],[x+w,y+h/2],[x+w-n,y+h],[x,y+h*0.88]]; }
+  function foldedRectPoints(x,y,w,h){ var f=Math.min(w,h)*0.22; return [[x,y],[x+w-f,y],[x+w,y+f],[x+w,y+h],[x,y+h]]; }
+  function starPoints(x,y,w,h){
+    var cx=x+w/2, cy=y+h/2, rOuter=Math.min(w,h)/2, rInner=rOuter*0.42;
+    var pts=[];
+    for (var i=0;i<10;i++){
+      var r = (i%2===0) ? rOuter : rInner;
+      var ang = -Math.PI/2 + i*Math.PI/5;
+      pts.push([cx+r*Math.cos(ang), cy+r*Math.sin(ang)]);
+    }
+    return pts;
+  }
+
+  function paperShapeEl(node){
+    var x=node.x, y=node.y, w=node.width, h=node.height;
+    var st = node.studyType || 'OTHER';
+    if (st === 'OTHER'){
+      return svgEl('ellipse', { cx:x+w/2, cy:y+h/2, rx:w/2, ry:h/2 });
+    }
+    if (st === 'REVIEW'){
+      return svgEl('rect', { x:x, y:y, width:w, height:h, rx:14, ry:14 });
+    }
+    var ptsFn = { RCT: diamondPoints, META: hexagonPoints, OBS: trianglePoints, GUIDE: starPoints, CASE: tagPoints }[st] || diamondPoints;
+    return svgEl('polygon', { points: pointsToStr(ptsFn(x,y,w,h)) });
+  }
+
+  function nodeShapeEl(node){
+    var x=node.x, y=node.y, w=node.width, h=node.height;
+    if (node.nodeType === 'paper') return paperShapeEl(node);
+    if (node.nodeType === 'memo') return svgEl('polygon', { points: pointsToStr(foldedRectPoints(x,y,w,h)) });
+    // question / conclusion: 二重枠の長方形
+    return svgEl('rect', { x:x, y:y, width:w, height:h, rx:8, ry:8 });
+  }
+
+  function svgEl(tag, attrs){
+    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  function nodeLabelText(node){
+    if (node.nodeType === 'paper') return node.title || '(無題の論文)';
+    return (node.text || '').split('\n')[0] || '(空)';
+  }
+
+  /* ---- 描画 ---- */
+  function renderNode(node){
+    var g = svgEl('g', { class: 'node-group', 'data-id': node.id });
+    var shape = nodeShapeEl(node);
+    shape.setAttribute('class', 'node-shape type-' + node.nodeType + (selected.type==='node' && selected.id===node.id ? ' selected' : ''));
+    shape.setAttribute('fill', node.color || '#ffffff');
+    g.appendChild(shape);
+
+    if (node.nodeType === 'question' || node.nodeType === 'conclusion'){
+      // 二重枠の内側の線
+      var inner = svgEl('rect', { x: node.x+5, y: node.y+5, width: node.width-10, height: node.height-10, rx:5, ry:5, fill:'none', stroke:'#666', 'stroke-width':1 });
+      g.appendChild(inner);
+    }
+
+    var label = svgEl('text', { x: node.x+node.width/2, y: node.y+node.height/2, class: 'node-label' });
+    label.textContent = truncate(nodeLabelText(node), 16);
+    g.appendChild(label);
+
+    if (node.nodeType === 'paper'){
+      var sub = svgEl('text', { x: node.x+node.width/2, y: node.y+node.height/2 + 16, class: 'node-sub' });
+      sub.textContent = STUDY_LABEL[node.studyType || 'OTHER'];
+      g.appendChild(sub);
+    }
+
+    g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
+    g.addEventListener('touchstart', function(evt){ onNodeMouseDown(evt, node); }, {passive:false});
+    nodeLayer.appendChild(g);
+  }
+
+  function truncate(s, n){ s = String(s); return s.length > n ? s.slice(0,n-1) + '…' : s; }
+
+  function nodeBoundaryPoint(node, towardX, towardY){
+    var cx = node.x + node.width/2, cy = node.y + node.height/2;
+    var rx = node.width/2, ry = node.height/2;
+    var dx = towardX-cx, dy = towardY-cy;
+    if (dx===0 && dy===0) return {x:cx,y:cy};
+    var t = 1/Math.sqrt(Math.pow(dx/rx,2)+Math.pow(dy/ry,2));
+    t = Math.min(t,1);
+    return { x: cx+dx*t, y: cy+dy*t };
+  }
+
+  function renderEdge(edge){
+    var s = getNode(edge.sourceNodeId), t = getNode(edge.targetNodeId);
+    if (!s || !t) return;
+    var scx=s.x+s.width/2, scy=s.y+s.height/2, tcx=t.x+t.width/2, tcy=t.y+t.height/2;
+    var p1 = nodeBoundaryPoint(s, tcx, tcy);
+    var p2 = nodeBoundaryPoint(t, scx, scy);
+    var d = 'M ' + p1.x + ' ' + p1.y + ' L ' + p2.x + ' ' + p2.y;
+
+    var g = svgEl('g', { class: 'edge-group', 'data-id': edge.id });
+    var color = edge.color || EDGE_CATEGORY_DEFAULT_COLOR[edge.category] || '#546e7a';
+    var path = svgEl('path', { d:d, stroke: color, class: 'edge-path' + (selected.type==='edge'&&selected.id===edge.id?' selected':'') });
+    if (edge.direction === 'one' || edge.direction === 'two'){
+      path.setAttribute('marker-end', 'url(#arrow)');
+    }
+    if (edge.direction === 'two'){
+      path.setAttribute('marker-start', 'url(#arrow)');
+    }
+    var hit = svgEl('path', { d:d, class: 'edge-hit' });
+    g.appendChild(path);
+    g.appendChild(hit);
+
+    if (edge.label){
+      var mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+      var bg = svgEl('circle', { cx:mx, cy:my, r: Math.max(10, edge.label.length*3), class:'edge-label-bg' });
+      var lbl = svgEl('text', { x:mx, y:my, class:'edge-label', fill: color });
+      lbl.textContent = truncate(edge.label, 10);
+      g.appendChild(bg); g.appendChild(lbl);
+    }
+
+    g.addEventListener('mousedown', function(evt){ evt.stopPropagation(); selectItem('edge', edge.id); });
+    edgeLayer.appendChild(g);
+  }
+
+  function render(){
+    nodeLayer.innerHTML = '';
+    edgeLayer.innerHTML = '';
+    state.edges.forEach(renderEdge);
+    state.nodes.forEach(renderNode);
+    document.getElementById('stat-nodes').textContent = 'ノード: ' + state.nodes.length;
+    document.getElementById('stat-edges').textContent = 'リンク: ' + state.edges.length;
+    renderPropPanel();
+    updateAddButtonAvailability();
+  }
+
+  function updateAddButtonAvailability(){
+    document.getElementById('btn-add-question').disabled = hasNodeOfType('question');
+    document.getElementById('btn-add-conclusion').disabled = hasNodeOfType('conclusion');
+  }
+
+  /* ---- プロパティパネル ---- */
+  function renderPropPanel(){
+    if (selected.type === 'node'){
+      var node = getNode(selected.id);
+      if (!node) { selected = {type:null,id:null}; }
+      else { renderNodePanel(node); return; }
+    }
+    if (selected.type === 'edge'){
+      var edge = getEdge(selected.id);
+      if (!edge) { selected = {type:null,id:null}; }
+      else { renderEdgePanel(edge); return; }
+    }
+    proppanel.innerHTML = '<div class="empty">ノードまたはリンクを選ぶと、ここで内容を編集できます。</div>';
+  }
+
+  function fieldRow(labelText, inputHtml){
+    return '<label>' + labelText + '</label>' + inputHtml;
+  }
+
+  function renderNodePanel(node){
+    var html = '<h3>' + ({paper:'論文ノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'メモノート'}[node.nodeType]) + '</h3>';
+    if (node.nodeType === 'paper'){
+      html += fieldRow('DOI(任意)', '<input type="text" id="f-doi" value="'+escAttr(node.doi)+'">');
+      html += fieldRow('タイトル', '<input type="text" id="f-title" value="'+escAttr(node.title)+'">');
+      html += fieldRow('著者', '<input type="text" id="f-authors" value="'+escAttr(node.authors)+'">');
+      html += '<div class="row2">' +
+        '<div>' + fieldRow('発表年', '<input type="text" id="f-year" value="'+escAttr(node.year)+'">') + '</div>' +
+        '<div>' + fieldRow('雑誌', '<input type="text" id="f-journal" value="'+escAttr(node.journal)+'">') + '</div>' +
+      '</div>';
+      html += '<label>研究種別</label><select id="f-studytype">' + STUDY_TYPES.map(function(t){
+        return '<option value="'+t+'"'+(node.studyType===t?' selected':'')+'>'+STUDY_LABEL[t]+'</option>';
+      }).join('') + '</select>';
+      html += fieldRow('メモ(鍵となる知見・引用文など)', '<textarea id="f-memo">'+escHtml(node.memo)+'</textarea>');
+    } else {
+      html += fieldRow('内容', '<textarea id="f-text" rows="6">'+escHtml(node.text)+'</textarea>');
+    }
+    html += '<button id="delbtn">このノードを削除</button>';
+    proppanel.innerHTML = html;
+
+    if (node.nodeType === 'paper'){
+      wireInput('f-doi', function(v){ node.doi = v; });
+      wireInput('f-title', function(v){ node.title = v; renderQuiet(); });
+      wireInput('f-authors', function(v){ node.authors = v; });
+      wireInput('f-year', function(v){ node.year = v; });
+      wireInput('f-journal', function(v){ node.journal = v; });
+      wireInput('f-memo', function(v){ node.memo = v; });
+      document.getElementById('f-studytype').addEventListener('change', function(){
+        node.studyType = this.value; pushHistory(); render();
+      });
+    } else {
+      wireInput('f-text', function(v){ node.text = v; renderQuiet(); });
+    }
+    document.getElementById('delbtn').addEventListener('click', function(){
+      deleteNode(node.id); pushHistory(); render();
+    });
+  }
+
+  function renderEdgePanel(edge){
+    var html = '<h3>リンク</h3>';
+    html += '<label>種類</label><select id="e-category">' + EDGE_CATEGORIES.map(function(c){
+      return '<option value="'+c+'"'+(edge.category===c?' selected':'')+'>'+EDGE_CATEGORY_LABEL[c]+'</option>';
+    }).join('') + '</select>';
+    html += fieldRow('自由記述ラベル(任意)', '<input type="text" id="e-label" value="'+escAttr(edge.label)+'">');
+    html += '<label>色</label><div class="swatch-row" id="e-swatches">' + EDGE_COLOR_PRESETS.map(function(c){
+      return '<span class="swatch'+(edge.color===c?' selected':'')+'" data-color="'+c+'" style="background:'+c+';"></span>';
+    }).join('') + '</div>';
+    html += '<label>方向</label><select id="e-direction">' +
+      '<option value="one"'+(edge.direction==='one'?' selected':'')+'>一方向(→)</option>' +
+      '<option value="two"'+(edge.direction==='two'?' selected':'')+'>双方向(↔)</option>' +
+      '<option value="none"'+(edge.direction==='none'?' selected':'')+'>無方向(－)</option>' +
+    '</select>';
+    html += '<button id="delbtn">このリンクを削除</button>';
+    proppanel.innerHTML = html;
+
+    document.getElementById('e-category').addEventListener('change', function(){
+      edge.category = this.value;
+      if (!edge.colorManuallySet) edge.color = EDGE_CATEGORY_DEFAULT_COLOR[edge.category];
+      pushHistory(); render();
+    });
+    wireInput('e-label', function(v){ edge.label = v; });
+    document.getElementById('e-direction').addEventListener('change', function(){
+      edge.direction = this.value; pushHistory(); render();
+    });
+    var swatches = document.querySelectorAll('#e-swatches .swatch');
+    for (var i=0;i<swatches.length;i++){
+      (function(sw){
+        sw.addEventListener('click', function(){
+          edge.color = sw.getAttribute('data-color');
+          edge.colorManuallySet = true;
+          pushHistory(); render();
+        });
+      })(swatches[i]);
+    }
+  }
+
+  function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+  function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function wireInput(id, onChange){
+    var el = document.getElementById(id);
+    if (!el) return;
+    var preSnap = null;
+    el.addEventListener('focus', function(){ preSnap = snapshot(); });
+    el.addEventListener('input', function(){ onChange(el.value); });
+    el.addEventListener('blur', function(){
+      if (preSnap !== null && preSnap !== snapshot()){
+        history.push(preSnap);
+        if (history.length > 60) history.shift();
+        future = [];
+        autosave();
+      }
+      preSnap = null;
+    });
+  }
+
+  function renderQuiet(){
+    // ラベルだけ再描画したい入力中の軽量更新(履歴は積まない)
+    var nodesSnapshotEls = nodeLayer.querySelectorAll('.node-group');
+    nodeLayer.innerHTML = '';
+    edgeLayer.innerHTML = '';
+    state.edges.forEach(renderEdge);
+    state.nodes.forEach(renderNode);
+  }
+
+  function deleteNode(id){
+    state.nodes = state.nodes.filter(function(n){ return n.id !== id; });
+    state.edges = state.edges.filter(function(e){ return e.sourceNodeId !== id && e.targetNodeId !== id; });
+    selected = { type:null, id:null };
+  }
+  function deleteEdge(id){
+    state.edges = state.edges.filter(function(e){ return e.id !== id; });
+    selected = { type:null, id:null };
+  }
+
+  function selectItem(type, id){
+    selected = { type: type, id: id };
+    render();
+  }
+
+  /* ---- ツール切り替え ---- */
+  function setTool(t){
+    tool = t;
+    edgeDraftSource = null;
+    var buttons = document.querySelectorAll('#toolbar button[data-tool]');
+    for (var i=0;i<buttons.length;i++){
+      buttons[i].classList.toggle('active', buttons[i].getAttribute('data-tool')===t);
+    }
+    svg.classList.remove('mode-add-paper','mode-add-question','mode-add-conclusion','mode-add-memo','mode-add-edge','mode-pan');
+    if (t.indexOf('add-')===0) svg.classList.add('mode-'+t);
+    updateHint();
+  }
+  function updateHint(){
+    var msgs = {
+      'select': '要素をクリックして選択・ドラッグで移動できます。背景をドラッグすると画面を動かせます。',
+      'add-paper': 'キャンバスをクリックすると論文ノードを追加します。',
+      'add-question': 'キャンバスをクリックすると臨床疑問ノードを追加します(地図に1つまで)。',
+      'add-conclusion': 'キャンバスをクリックすると自分の結論ノードを追加します(地図に1つまで)。',
+      'add-memo': 'キャンバスをクリックするとメモノートを追加します。',
+      'add-edge': '始点ノード→終点ノードの順にクリックするとリンクを作成します。'
+    };
+    hintEl.textContent = msgs[tool] || '';
+  }
+
+  /* ---- 座標変換・表示 ---- */
+  function eventPoint(evt){
+    if (evt.touches && evt.touches.length) return evt.touches[0];
+    if (evt.changedTouches && evt.changedTouches.length) return evt.changedTouches[0];
+    return evt;
+  }
+  function screenToWorld(evt){
+    var pt = eventPoint(evt);
+    var rect = svg.getBoundingClientRect();
+    var sx = pt.clientX - rect.left, sy = pt.clientY - rect.top;
+    return { x: (sx - view.x)/view.scale, y: (sy - view.y)/view.scale };
+  }
+  function applyViewTransform(){
+    viewport.setAttribute('transform', 'translate('+view.x+','+view.y+') scale('+view.scale+')');
+    document.getElementById('stat-zoom').textContent = 'ズーム: ' + Math.round(view.scale*100) + '%';
+  }
+  function computeContentBounds(){
+    var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    state.nodes.forEach(function(n){
+      minX=Math.min(minX,n.x); minY=Math.min(minY,n.y);
+      maxX=Math.max(maxX,n.x+n.width); maxY=Math.max(maxY,n.y+n.height);
+    });
+    if (minX===Infinity) return null;
+    return {minX:minX,minY:minY,maxX:maxX,maxY:maxY};
+  }
+  function fitToView(){
+    var b = computeContentBounds();
+    var rect = svg.getBoundingClientRect();
+    var w = rect.width||800, h = rect.height||600;
+    if (!b){ view.scale=1; view.x=w/2; view.y=h/2; applyViewTransform(); return; }
+    var padding=60;
+    var cw=Math.max(b.maxX-b.minX,1), ch=Math.max(b.maxY-b.minY,1);
+    var scale = Math.min(Math.max(w-padding*2,50)/cw, Math.max(h-padding*2,50)/ch, 3);
+    scale = Math.max(scale,0.1);
+    view.scale = scale;
+    view.x = w/2 - (b.minX+b.maxX)/2*scale;
+    view.y = h/2 - (b.minY+b.maxY)/2*scale;
+    applyViewTransform();
+  }
+
+  /* ---- マウス/タッチ操作 ---- */
+  function onNodeMouseDown(evt, node){
+    evt.preventDefault(); evt.stopPropagation();
+    if (tool === 'add-edge'){
+      if (!edgeDraftSource){
+        edgeDraftSource = node.id;
+      } else if (edgeDraftSource !== node.id){
+        var edge = {
+          id: newId('edge'), sourceNodeId: edgeDraftSource, targetNodeId: node.id,
+          category: 'free', label: '', color: EDGE_CATEGORY_DEFAULT_COLOR.free, direction: 'one'
+        };
+        state.edges.push(edge);
+        pushHistory();
+        setTool('select');
+        selectItem('edge', edge.id);
+      }
+      return;
+    }
+    selectItem('node', node.id);
+    var startWorld = screenToWorld(evt);
+    dragging = { id: node.id, offX: startWorld.x - node.x, offY: startWorld.y - node.y };
+  }
+
+  svg.addEventListener('mousedown', function(evt){
+    if (evt.target !== svg && evt.target !== viewport && evt.target.id !== 'canvas') return;
+    if (tool.indexOf('add-') === 0 && tool !== 'add-edge'){
+      var nodeType = tool.replace('add-','');
+      if ((nodeType==='question' && hasNodeOfType('question')) || (nodeType==='conclusion' && hasNodeOfType('conclusion'))) return;
+      var w = screenToWorld(evt);
+      var node = createNode(nodeType, w.x, w.y);
+      state.nodes.push(node);
+      pushHistory();
+      setTool('select');
+      selectItem('node', node.id);
+      return;
+    }
+    if (tool === 'select'){
+      selectItem(null, null);
+      isPanning = true;
+      panStart = { x: eventPoint(evt).clientX - view.x, y: eventPoint(evt).clientY - view.y };
+    }
+  });
+
+  window.addEventListener('mousemove', function(evt){
+    if (dragging){
+      var w = screenToWorld(evt);
+      var node = getNode(dragging.id);
+      if (node){ node.x = w.x - dragging.offX; node.y = w.y - dragging.offY; renderQuiet(); }
+    } else if (isPanning && panStart){
+      view.x = eventPoint(evt).clientX - panStart.x;
+      view.y = eventPoint(evt).clientY - panStart.y;
+      applyViewTransform();
+    }
+  });
+  window.addEventListener('mouseup', function(){
+    if (dragging){ dragging = null; pushHistory(); render(); }
+    isPanning = false; panStart = null;
+  });
+
+  svg.addEventListener('wheel', function(evt){
+    evt.preventDefault();
+    var factor = evt.deltaY < 0 ? 1.1 : 0.9;
+    var rect = svg.getBoundingClientRect();
+    var mx = evt.clientX-rect.left, my = evt.clientY-rect.top;
+    var wx = (mx-view.x)/view.scale, wy = (my-view.y)/view.scale;
+    view.scale = Math.min(Math.max(view.scale*factor, 0.1), 4);
+    view.x = mx - wx*view.scale;
+    view.y = my - wy*view.scale;
+    applyViewTransform();
+  }, { passive:false });
+
+  document.addEventListener('keydown', function(evt){
+    if (evt.key === 'Delete' || evt.key === 'Backspace'){
+      var tag = (document.activeElement && document.activeElement.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (selected.type === 'node'){ deleteNode(selected.id); pushHistory(); render(); }
+      else if (selected.type === 'edge'){ deleteEdge(selected.id); pushHistory(); render(); }
+    }
+  });
+
+  /* ---- ツールバー・トップバーの配線 ---- */
+  document.querySelectorAll('#toolbar button[data-tool]').forEach(function(btn){
+    btn.addEventListener('click', function(){ setTool(btn.getAttribute('data-tool')); });
+  });
+  document.getElementById('btn-zoomin').addEventListener('click', function(){ view.scale=Math.min(view.scale*1.2,4); applyViewTransform(); });
+  document.getElementById('btn-zoomout').addEventListener('click', function(){ view.scale=Math.max(view.scale*0.8,0.1); applyViewTransform(); });
+  document.getElementById('btn-fit').addEventListener('click', fitToView);
+  document.getElementById('btn-undo').addEventListener('click', undo);
+  document.getElementById('btn-redo').addEventListener('click', redo);
+
+  titleInput.addEventListener('input', function(){ state.title = titleInput.value; });
+  titleInput.addEventListener('blur', function(){ pushHistory(); });
+
+  document.getElementById('btn-new').addEventListener('click', function(){
+    if (!confirm('今の地図を消して新規作成しますか？(自動保存されている内容は上書きされます)')) return;
+    state = emptyState();
+    titleInput.value = state.title;
+    history = []; future = []; selected = {type:null,id:null};
+    render(); fitToView(); pushHistory();
+  });
+
+  document.getElementById('btn-export-json').addEventListener('click', function(){
+    var payload = Object.assign({}, state, { exportedAt: new Date().toISOString() });
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (state.title || 'pathfinder-map').replace(/[\\/:*?"<>|]/g,'_') + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+
+  document.getElementById('btn-import-json').addEventListener('click', function(){
+    document.getElementById('import-json-input').click();
+  });
+  document.getElementById('import-json-input').addEventListener('change', function(evt){
+    var file = evt.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        var loaded = JSON.parse(reader.result);
+        if (!loaded || !Array.isArray(loaded.nodes)) throw new Error('形式が違います');
+        state = { title: loaded.title || '無題の地図', nodes: loaded.nodes || [], edges: loaded.edges || [], nextId: loaded.nextId || (loaded.nodes.length + loaded.edges.length + 1) };
+        titleInput.value = state.title;
+        history = []; future = []; selected = {type:null,id:null};
+        render(); fitToView(); pushHistory();
+      } catch(e){
+        alert('JSONの読み込みに失敗しました: ' + e.message);
+      }
+    };
+    reader.readAsText(file);
+    evt.target.value = '';
+  });
+
+  /* ---- 起動 ---- */
+  if (loadFromStorage()){
+    titleInput.value = state.title;
+  }
+  render();
+  fitToView();
+})();
+</script>
+</body>
+</html>
