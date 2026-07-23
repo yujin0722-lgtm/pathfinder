@@ -1123,8 +1123,54 @@
     evt.target.value = '';
   });
 
+  /* ---- Citrailからの受け取り(Local Storage経由) ---- */
+  var PF_HANDOFF_KEY = 'chm_to_pathfinder';
+
+  function importPapersFromCitrail(papers){
+    var x0 = 120, y0 = 120;
+    papers.forEach(function(cp, i){
+      var node = createNode('paper', x0 + (i % 4) * 190, y0 + Math.floor(i/4) * 130);
+      node.title = cp.title || node.title;
+      node.authors = Array.isArray(cp.authors) ? cp.authors.join(', ') : (cp.authors || '');
+      node.year = (cp.year != null) ? String(cp.year) : '';
+      node.journal = cp.journal || '';
+      node.doi = cp.doi || '';
+      node.pmid = cp.pmid || '';
+      node.openalexId = cp.id || null;
+      node.referencedWorks = Array.isArray(cp.referencedWorks) ? cp.referencedWorks : [];
+      node.studyType = (STUDY_TYPES.indexOf(cp.study) !== -1) ? cp.study : 'OTHER';
+      state.nodes.push(node);
+    });
+    recomputeAutoLinks();
+    pushHistory();
+    render();
+    fitToView();
+  }
+
+  function checkIncomingHandoff(){
+    if (!HAS_STORAGE) return;
+    var raw;
+    try { raw = localStorage.getItem(PF_HANDOFF_KEY); } catch(e){ return; }
+    if (!raw) return;
+    try { localStorage.removeItem(PF_HANDOFF_KEY); } catch(e){}
+    var papers;
+    try { papers = JSON.parse(raw); } catch(e){ papers = null; }
+    if (!papers || !Array.isArray(papers) || !papers.length) return;
+
+    if (state.nodes.length > 0){
+      var addToCurrent = confirm(
+        'Citrailから' + papers.length + '件の論文が届きました。\n\n' +
+        '「OK」を押すと今の地図に追加します。\n' +
+        '「キャンセル」を押すと新しい地図を作ってそこに追加します。'
+      );
+      if (!addToCurrent) createNewMap();
+    }
+    importPapersFromCitrail(papers);
+  }
+
   /* ---- 起動 ---- */
   loadInitialMap();
+  checkIncomingHandoff();
 })();
 </script>
 </body>
