@@ -267,11 +267,19 @@
   /* ---- 図形生成(論文ノードは研究種別で形が変わる) ---- */
   function pointsToStr(pts){ return pts.map(function(p){ return p[0]+','+p[1]; }).join(' '); }
 
+  // ノードの外枠(横長になりがち)の中に、見た目が整った形(正多角形に近い比率)を
+  // 中央揃えで収めるための箱。高さいっぱいは使い、横幅だけ h*ratio までに制限する。
+  function shapeBox(x,y,w,h){
+    var ratio = 1.25;
+    var bw = Math.min(w, h * ratio);
+    return { x: x + (w - bw) / 2, y: y, w: bw, h: h };
+  }
+
   function rectPoints(x,y,w,h){ return [[x,y],[x+w,y],[x+w,y+h],[x,y+h]]; }
-  function diamondPoints(x,y,w,h){ return [[x+w/2,y],[x+w,y+h/2],[x+w/2,y+h],[x,y+h/2]]; }
-  function hexagonPoints(x,y,w,h){ var q=w*0.25; return [[x+q,y],[x+w-q,y],[x+w,y+h/2],[x+w-q,y+h],[x+q,y+h],[x,y+h/2]]; }
-  function trianglePoints(x,y,w,h){ return [[x+w/2,y],[x+w,y+h],[x,y+h]]; }
-  function tagPoints(x,y,w,h){ var n=w*0.16; return [[x,y+h*0.12],[x+w-n,y],[x+w,y+h/2],[x+w-n,y+h],[x,y+h*0.88]]; }
+  function diamondPoints(x,y,w,h){ var b=shapeBox(x,y,w,h); return [[b.x+b.w/2,b.y],[b.x+b.w,b.y+b.h/2],[b.x+b.w/2,b.y+b.h],[b.x,b.y+b.h/2]]; }
+  function hexagonPoints(x,y,w,h){ var b=shapeBox(x,y,w,h); var q=b.w*0.25; return [[b.x+q,b.y],[b.x+b.w-q,b.y],[b.x+b.w,b.y+b.h/2],[b.x+b.w-q,b.y+b.h],[b.x+q,b.y+b.h],[b.x,b.y+b.h/2]]; }
+  function trianglePoints(x,y,w,h){ var b=shapeBox(x,y,w,h); return [[b.x+b.w/2,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]]; }
+  function tagPoints(x,y,w,h){ var b=shapeBox(x,y,w,h); var n=b.w*0.2; return [[b.x,b.y+b.h*0.12],[b.x+b.w-n,b.y],[b.x+b.w,b.y+b.h/2],[b.x+b.w-n,b.y+b.h],[b.x,b.y+b.h*0.88]]; }
   function foldedRectPoints(x,y,w,h){ var f=Math.min(w,h)*0.22; return [[x,y],[x+w-f,y],[x+w,y+f],[x+w,y+h],[x,y+h]]; }
   function starPoints(x,y,w,h){
     var cx=x+w/2, cy=y+h/2, rOuter=Math.min(w,h)/2, rInner=rOuter*0.42;
@@ -499,6 +507,9 @@
         });
       })(swatches[i]);
     }
+    document.getElementById('delbtn').addEventListener('click', function(){
+      deleteEdge(edge.id); pushHistory(); render();
+    });
   }
 
   function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
