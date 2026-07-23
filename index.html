@@ -78,6 +78,7 @@
     <button id="btn-export-json" title="今の地図をJSONファイルとして書き出す">JSONで書き出し</button>
     <button id="btn-import-json" title="JSONファイルから読み込む">JSONを読み込む</button>
     <input type="file" id="import-json-input" accept="application/json,.json" style="display:none;">
+    <button id="btn-apikey" title="OpenAlexのAPIキーを設定します(Citrailと共有されます)">APIキー設定</button>
     <div class="spacer"></div>
     <span id="savenote">保存済み</span>
   </div>
@@ -231,6 +232,150 @@
     } catch(e){ return false; }
   }
 
+  /* ---- OpenAlex連携(DOI自動取得・研究種別判定・自動リンク) ---- */
+  /* CitrailのAPIキー保存先(chm_openalex_key)を共有し、二重入力を避ける */
+  var OPENALEX_KEY_STORAGE = 'chm_openalex_key';
+  function getApiKey(){ try { return localStorage.getItem(OPENALEX_KEY_STORAGE) || ''; } catch(e){ return ''; } }
+  function saveApiKey(key){ try { localStorage.setItem(OPENALEX_KEY_STORAGE, (key||'').trim()); } catch(e){} }
+
+  var OPENALEX_BASE = 'https://api.openalex.org';
+  var OPENALEX_SELECT = ['id','display_name','authorships','publication_year','primary_location','doi','ids','referenced_works','type'].join(',');
+
+  function ApiError(code, status){ this.code = code; this.status = status; }
+  ApiError.prototype = Object.create(Error.prototype);
+
+  function apiGet(path, params){
+    var url = new URL(OPENALEX_BASE + path);
+    for (var k in params) url.searchParams.set(k, params[k]);
+    var key = getApiKey();
+    if (key) url.searchParams.set('api_key', key);
+    return fetch(url.toString()).catch(function(){ throw new ApiError('network'); }).then(function(res){
+      if (res.status === 404) throw new ApiError('notfound', 404);
+      if (res.status === 401 || res.status === 403) throw new ApiError('auth', res.status);
+      if (res.status === 409 || res.status === 429) throw new ApiError('limit', res.status);
+      if (!res.ok) throw new ApiError('other', res.status);
+      return res.json().catch(function(){ throw new ApiError('badresponse'); });
+    });
+  }
+
+  function shortOAId(u){ return u ? String(u).replace(/^https?:\/\/openalex\.org\//,'') : null; }
+  function stripDoiUrl(u){ return u ? String(u).replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,'') : null; }
+  function extractPmid(u){ if (!u) return null; var m = String(u).match(/(\d+)\s*\/?\s*$/); return m ? m[1] : null; }
+
+  function normalizeDoi(raw){
+    var s = (raw||'').trim();
+    if (!s) return null;
+    var m = s.match(/^https?:\/\/(?:dx\.)?doi\.org\/(10\..+)$/i);
+    if (m) return decodeURIComponent(m[1]);
+    m = s.match(/^doi:\s*(10\..+)$/i);
+    if (m) return m[1].trim();
+    if (/^10\.\S+\/\S+/.test(s)) return s;
+    return null;
+  }
+
+  /* 研究種別の暫定判定(タイトル・OpenAlexのtypeによるヒューリスティック。Citrailのapi.jsを流用) */
+  function classifyStudyFromTitle(w){
+    var t = (w.display_name||'').toLowerCase();
+    if (/meta-?analys|systematic review/.test(t)) return 'META';
+    if (/randomi[sz]ed|randomi[sz]ation/.test(t)) return 'RCT';
+    if (/cohort|case-?control|cross-?sectional|observational|registry|surveillance|longitudinal|retrospective|prospective|follow-?up study/.test(t)) return 'OBS';
+    if (/case report|case series/.test(t)) return 'CASE';
+    if (w.type === 'review' || /\breview\b/.test(t)) return 'REVIEW';
+    return 'OTHER';
+  }
+
+  function toPaperFields(w){
+    return {
+      title: w.display_name || '(タイトル情報なし)',
+      authors: (w.authorships||[]).map(function(a){ return a.author && a.author.display_name; }).filter(Boolean).join(', '),
+      year: (w.publication_year!=null) ? String(w.publication_year) : '',
+      journal: (w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || '',
+      doi: stripDoiUrl(w.doi),
+      pmid: extractPmid(w.ids && w.ids.pmid),
+      openalexId: shortOAId(w.id),
+      referencedWorks: (w.referenced_works||[]).map(shortOAId),
+      studyType: classifyStudyFromTitle(w)
+    };
+  }
+
+  /* PMIDがある場合、PubMed公式のPublication Typeで研究種別を上書き(Citrailと同じ方針) */
+  function classifyFromPubTypes(types){
+    var t = types.map(function(x){ return String(x).toLowerCase(); });
+    function has(s){ return t.some(function(x){ return x.indexOf(s) !== -1; }); }
+    if (has('meta-analysis') || has('systematic review')) return 'META';
+    if (has('randomized controlled trial')) return 'RCT';
+    if (has('guideline')) return 'GUIDE';
+    if (has('observational study')) return 'OBS';
+    if (has('case reports')) return 'CASE';
+    if (has('review')) return 'REVIEW';
+    return null;
+  }
+  function fetchPubTypeCategory(pmid){
+    var url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&retmode=json&id=' + encodeURIComponent(pmid);
+    return fetch(url).then(function(res){
+      if (!res.ok) return null;
+      return res.json().then(function(data){
+        var rec = data.result && data.result[pmid];
+        if (rec && Array.isArray(rec.pubtype)) return classifyFromPubTypes(rec.pubtype);
+        return null;
+      });
+    }).catch(function(){ return null; });
+  }
+
+  function apiErrorMessage(e){
+    switch (e && e.code){
+      case 'notfound': return 'この論文がOpenAlexで見つかりませんでした。DOIが正しいか確認してください。';
+      case 'auth': return 'APIキーが設定されていないか無効です。「APIキー設定」からOpenAlexの無料APIキーを登録してください。';
+      case 'limit': return 'データ提供元(OpenAlex)の利用上限に達した可能性があります。時間を置いて再度お試しください。';
+      case 'network': return '通信エラーが発生しました。インターネット接続を確認してください。';
+      case 'badresponse': return 'データの形式に問題があり読み込めませんでした。';
+      default: return '論文情報を取得できませんでした。';
+    }
+  }
+
+  function fetchAndApplyDoi(node, doiRaw){
+    var doi = normalizeDoi(doiRaw);
+    if (!doi){ alert('DOIの形式を確認してください(例: 10.1001/xxxxx)'); return; }
+    var btn = document.getElementById('f-doi-fetch');
+    if (btn){ btn.disabled = true; btn.textContent = '取得中…'; }
+    apiGet('/works/doi:' + encodeURIComponent(doi), { select: OPENALEX_SELECT }).then(function(w){
+      var p = toPaperFields(w);
+      node.doi = p.doi || doi;
+      node.title = p.title;
+      node.authors = p.authors;
+      node.year = p.year;
+      node.journal = p.journal;
+      node.studyType = p.studyType;
+      node.openalexId = p.openalexId;
+      node.referencedWorks = p.referencedWorks;
+      node.pmid = p.pmid;
+      return (p.pmid ? fetchPubTypeCategory(p.pmid) : Promise.resolve(null)).then(function(cat){
+        if (cat) node.studyType = cat;
+        recomputeAutoLinks();
+        pushHistory();
+        render();
+        alert('論文情報を取得しました:\n' + node.title);
+      });
+    }).catch(function(e){
+      alert(apiErrorMessage(e));
+      if (btn){ btn.disabled = false; btn.textContent = '取得'; }
+    });
+  }
+
+  /* DOI同士の引用関係(OpenAlexのreferenced_works)から自動リンクを再構築する */
+  function recomputeAutoLinks(){
+    state.edges = state.edges.filter(function(e){ return !e.auto; });
+    var papers = state.nodes.filter(function(n){ return n.nodeType === 'paper' && n.openalexId; });
+    papers.forEach(function(a){
+      papers.forEach(function(b){
+        if (a === b || !a.referencedWorks) return;
+        if (a.referencedWorks.indexOf(b.openalexId) !== -1){
+          state.edges.push({ id: newId('edge'), sourceNodeId: a.id, targetNodeId: b.id, auto: true, direction: 'one', color: '#9e9e9e' });
+        }
+      });
+    });
+  }
+
   /* ---- ノード種類ごとの既定サイズ・色 ---- */
   var NODE_DEFAULTS = {
     paper:      { width: 150, height: 74, color: '#ffffff' },
@@ -365,29 +510,62 @@
     return { x: cx+dx*t, y: cy+dy*t };
   }
 
-  function renderEdge(edge){
+  // 同じノードペアに複数のリンク(自動+手動など)がある場合、重ならないよう
+  // 少しカーブさせて並べて描画するためのオフセット量を割り当てる
+  function edgePairKey(edge){
+    var a = edge.sourceNodeId, b = edge.targetNodeId;
+    return a < b ? a+'|'+b : b+'|'+a;
+  }
+  function computeEdgeCurveOffsets(edges){
+    var groups = {};
+    edges.forEach(function(e){ var k = edgePairKey(e); (groups[k] = groups[k] || []).push(e); });
+    var offsets = {};
+    Object.keys(groups).forEach(function(k){
+      var g = groups[k];
+      var n = g.length;
+      g.forEach(function(e, i){
+        offsets[e.id] = (n === 1) ? 0 : (i - (n-1)/2) * 26;
+      });
+    });
+    return offsets;
+  }
+
+  function renderEdge(edge, curveOffset){
     var s = getNode(edge.sourceNodeId), t = getNode(edge.targetNodeId);
     if (!s || !t) return;
     var scx=s.x+s.width/2, scy=s.y+s.height/2, tcx=t.x+t.width/2, tcy=t.y+t.height/2;
     var p1 = nodeBoundaryPoint(s, tcx, tcy);
     var p2 = nodeBoundaryPoint(t, scx, scy);
-    var d = 'M ' + p1.x + ' ' + p1.y + ' L ' + p2.x + ' ' + p2.y;
+    var mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+    var d;
+    if (curveOffset){
+      var dx=p2.x-p1.x, dy=p2.y-p1.y, len=Math.sqrt(dx*dx+dy*dy)||1;
+      var nx=-dy/len, ny=dx/len;
+      mx = mx + nx*curveOffset; my = my + ny*curveOffset;
+      d = 'M ' + p1.x + ' ' + p1.y + ' Q ' + mx + ' ' + my + ' ' + p2.x + ' ' + p2.y;
+    } else {
+      d = 'M ' + p1.x + ' ' + p1.y + ' L ' + p2.x + ' ' + p2.y;
+    }
 
     var g = svgEl('g', { class: 'edge-group', 'data-id': edge.id });
-    var color = edge.color || EDGE_CATEGORY_DEFAULT_COLOR[edge.category] || '#546e7a';
+    var color = edge.auto ? '#9e9e9e' : (edge.color || EDGE_CATEGORY_DEFAULT_COLOR[edge.category] || '#546e7a');
     var path = svgEl('path', { d:d, stroke: color, class: 'edge-path' + (selected.type==='edge'&&selected.id===edge.id?' selected':'') });
-    if (edge.direction === 'one' || edge.direction === 'two'){
+    if (edge.auto){
+      path.setAttribute('stroke-dasharray', '6,4');
       path.setAttribute('marker-end', 'url(#arrow)');
-    }
-    if (edge.direction === 'two'){
-      path.setAttribute('marker-start', 'url(#arrow)');
+    } else {
+      if (edge.direction === 'one' || edge.direction === 'two'){
+        path.setAttribute('marker-end', 'url(#arrow)');
+      }
+      if (edge.direction === 'two'){
+        path.setAttribute('marker-start', 'url(#arrow)');
+      }
     }
     var hit = svgEl('path', { d:d, class: 'edge-hit' });
     g.appendChild(path);
     g.appendChild(hit);
 
     if (edge.label){
-      var mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
       var bg = svgEl('circle', { cx:mx, cy:my, r: Math.max(10, edge.label.length*3), class:'edge-label-bg' });
       var lbl = svgEl('text', { x:mx, y:my, class:'edge-label', fill: color });
       lbl.textContent = truncate(edge.label, 10);
@@ -401,7 +579,8 @@
   function render(){
     nodeLayer.innerHTML = '';
     edgeLayer.innerHTML = '';
-    state.edges.forEach(renderEdge);
+    var offsets = computeEdgeCurveOffsets(state.edges);
+    state.edges.forEach(function(e){ renderEdge(e, offsets[e.id]); });
     state.nodes.forEach(renderNode);
     document.getElementById('stat-nodes').textContent = 'ノード: ' + state.nodes.length;
     document.getElementById('stat-edges').textContent = 'リンク: ' + state.edges.length;
@@ -436,7 +615,7 @@
   function renderNodePanel(node){
     var html = '<h3>' + ({paper:'論文ノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'メモノート'}[node.nodeType]) + '</h3>';
     if (node.nodeType === 'paper'){
-      html += fieldRow('DOI(任意)', '<input type="text" id="f-doi" value="'+escAttr(node.doi)+'">');
+      html += '<label>DOI(任意)</label><div style="display:flex;gap:6px;"><input type="text" id="f-doi" value="'+escAttr(node.doi)+'" style="flex:1;" placeholder="10.1001/xxxxx"><button id="f-doi-fetch" style="flex:none;" title="OpenAlexから書誌情報を取得">取得</button></div>';
       html += fieldRow('タイトル', '<input type="text" id="f-title" value="'+escAttr(node.title)+'">');
       html += fieldRow('著者', '<input type="text" id="f-authors" value="'+escAttr(node.authors)+'">');
       html += '<div class="row2">' +
@@ -455,6 +634,9 @@
 
     if (node.nodeType === 'paper'){
       wireInput('f-doi', function(v){ node.doi = v; });
+      document.getElementById('f-doi-fetch').addEventListener('click', function(){
+        fetchAndApplyDoi(node, document.getElementById('f-doi').value);
+      });
       wireInput('f-title', function(v){ node.title = v; renderQuiet(); });
       wireInput('f-authors', function(v){ node.authors = v; });
       wireInput('f-year', function(v){ node.year = v; });
@@ -472,6 +654,10 @@
   }
 
   function renderEdgePanel(edge){
+    if (edge.auto){
+      proppanel.innerHTML = '<h3>自動リンク</h3><div class="empty" style="margin-top:0;">OpenAlexの引用関係に基づく事実のリンクです。論文ノードのDOIを再取得すると、内容に応じて自動的に更新されます。手動では編集・削除できません。</div>';
+      return;
+    }
     var html = '<h3>リンク</h3>';
     html += '<label>種類</label><select id="e-category">' + EDGE_CATEGORIES.map(function(c){
       return '<option value="'+c+'"'+(edge.category===c?' selected':'')+'>'+EDGE_CATEGORY_LABEL[c]+'</option>';
@@ -534,10 +720,10 @@
 
   function renderQuiet(){
     // ラベルだけ再描画したい入力中の軽量更新(履歴は積まない)
-    var nodesSnapshotEls = nodeLayer.querySelectorAll('.node-group');
     nodeLayer.innerHTML = '';
     edgeLayer.innerHTML = '';
-    state.edges.forEach(renderEdge);
+    var offsets = computeEdgeCurveOffsets(state.edges);
+    state.edges.forEach(function(e){ renderEdge(e, offsets[e.id]); });
     state.nodes.forEach(renderNode);
   }
 
@@ -709,6 +895,12 @@
   document.getElementById('btn-fit').addEventListener('click', fitToView);
   document.getElementById('btn-undo').addEventListener('click', undo);
   document.getElementById('btn-redo').addEventListener('click', redo);
+
+  document.getElementById('btn-apikey').addEventListener('click', function(){
+    var cur = getApiKey();
+    var v = window.prompt('OpenAlexのAPIキーを入力してください(openalex.org/settings/api で無料取得できます)。\nCitrailと同じブラウザで使っている場合は共有されます。', cur);
+    if (v !== null) saveApiKey(v);
+  });
 
   titleInput.addEventListener('input', function(){ state.title = titleInput.value; });
   titleInput.addEventListener('blur', function(){ pushHistory(); });
