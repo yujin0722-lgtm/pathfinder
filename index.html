@@ -81,8 +81,8 @@
   .swatch { width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; display: block; }
   .swatch.selected { border: 2px solid var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 
-  /* Citrail風の詳細パネル(タグ+タイトル+dl形式の項目) */
-  .p-top { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 2px; }
+  /* Citrail風の詳細パネル(タグ+タイトル+dl形式の項目)。タグとタイトルは別の行にし、タイトルを広く表示する */
+  .p-top { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 2px; }
   .p-tag-select { font-size: 11px; border: none; border-radius: 4px; padding: 2px 6px; background: var(--accent-soft); color: var(--accent); cursor: pointer; }
   .p-title-input { font-size: 14.5px; font-weight: 600; border: none; border-bottom: 1px solid transparent; width: 100%; padding: 3px 0; background: transparent; }
   .p-title-input:focus { border-bottom: 1px solid var(--accent); outline: none; }
@@ -102,8 +102,10 @@
 
   /* エビデンスノードのメモ展開表示 */
   .memo-expand-content { box-sizing: border-box; width: 100%; height: 100%; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 10px rgba(28,43,51,0.18); font-size: 12.5px; padding: 8px; overflow-y: auto; }
-  .memo-expand-content .close-btn { float: right; border: 1px solid var(--line); background: var(--canvas); border-radius: 4px; font-size: 11px; padding: 2px 8px; cursor: pointer; margin-left: 6px; }
+  .memo-expand-content .close-btn { float: right; border: 1px solid var(--line); background: var(--canvas); border-radius: 50%; width: 20px; height: 20px; padding: 0; font-size: 13px; line-height: 1; cursor: pointer; margin-left: 6px; color: var(--sub); }
+  .memo-expand-content .close-btn:hover { border-color: var(--accent); color: var(--accent); }
   .memo-expand-content .memo-expand-body { margin-top: 24px; white-space: pre-wrap; word-break: break-word; }
+  .memo-expand-resize-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; cursor: nwse-resize; }
 
   #statusbar { flex: none; height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--sub); background: var(--panel); }
 
@@ -214,8 +216,11 @@
 
   // 手動リンクの色プリセット(パステル調)
   var EDGE_COLOR_PRESETS = ["#a8d8b9","#f4a9a8","#a9c9ef","#f6cf8e","#c9b3e0","#b8b8b8"];
-  // ノードの色プリセット(4種類のノード共通)
-  var NODE_COLOR_PRESETS = ["#ffffff","#cfe9fb","#d7f0d8","#fff4c2","#ffd9d9","#e6d7f5","#ffe3c2","#d9d9d9"];
+  // ノードの色プリセット(4種類のノード共通)。基本6色 x 明るい/濃いの2段階(6列x2行のグリッドで並ぶ)
+  var NODE_COLOR_PRESETS = [
+    "#f2f2f2","#cfe9fb","#d7f0d8","#fff4c2","#ffe3e3","#e6d7f5",
+    "#cfcfcf","#8fc4ea","#a3d9a5","#ffe066","#f2a6a6","#c9a8e8"
+  ];
 
   var svg = document.getElementById('canvas');
   var viewport = document.getElementById('viewport');
@@ -261,6 +266,7 @@
   var future = [];
   var dragging = null;
   var resizing = null;
+  var resizingMemoBox = null;
   var isPanning = false;
   var panStart = null;
   var MIN_NODE_WIDTH = 70, MIN_NODE_HEIGHT = 50;
@@ -474,7 +480,7 @@
   function saveApiKey(key){ try { localStorage.setItem(OPENALEX_KEY_STORAGE, (key||'').trim()); } catch(e){} }
 
   var OPENALEX_BASE = 'https://api.openalex.org';
-  var OPENALEX_SELECT = ['id','display_name','authorships','publication_year','primary_location','doi','ids','referenced_works','type'].join(',');
+  var OPENALEX_SELECT = ['id','display_name','authorships','publication_year','primary_location','doi','ids','referenced_works','type','cited_by_count'].join(',');
 
   function ApiError(code, status){ this.code = code; this.status = status; }
   ApiError.prototype = Object.create(Error.prototype);
@@ -529,7 +535,8 @@
       pmid: extractPmid(w.ids && w.ids.pmid),
       openalexId: shortOAId(w.id),
       referencedWorks: (w.referenced_works||[]).map(shortOAId),
-      studyType: classifyStudyFromTitle(w)
+      studyType: classifyStudyFromTitle(w),
+      cites: (w.cited_by_count != null) ? w.cited_by_count : null
     };
   }
 
@@ -584,6 +591,7 @@
       node.openalexId = p.openalexId;
       node.referencedWorks = p.referencedWorks;
       node.pmid = p.pmid;
+      node.cites = p.cites;
       return (p.pmid ? fetchPubTypeCategory(p.pmid) : Promise.resolve(null)).then(function(cat){
         if (cat) node.studyType = cat;
         recomputeAutoLinks();
@@ -699,8 +707,9 @@
     return el;
   }
 
-  // エビデンスノードの中に表示する短い抜粋(メモの冒頭、無ければタイトルの冒頭)
+  // エビデンスノードの中に表示する短い抜粋。優先順位: PMID → メモの冒頭 → タイトルの冒頭
   function nodeInsideExcerpt(node){
+    if (node.pmid) return 'PMID ' + node.pmid;
     var src = (node.memo && node.memo.trim()) ? node.memo.trim() : (node.title || '');
     src = src.replace(/\n/g, ' ');
     return truncate(src, 10) || '(空)';
@@ -737,10 +746,15 @@
 
   /* ---- 描画 ---- */
   var expandedMemoIds = {}; // どのエビデンスノードのメモが展開表示中か(保存はしない一時的な状態)
+  var expandedMemoSizes = {}; // 展開ウィンドウをドラッグでリサイズした大きさ(同じく一時的な状態)
+  var MEMO_BOX_MIN_W = 140, MEMO_BOX_MIN_H = 80;
   function toggleMemoExpand(nodeId){
     if (expandedMemoIds[nodeId]) delete expandedMemoIds[nodeId];
     else expandedMemoIds[nodeId] = true;
     renderQuiet();
+  }
+  function getMemoBoxSize(nodeId){
+    return expandedMemoSizes[nodeId] || { w: 220, h: 150 };
   }
 
   function renderNode(node){
@@ -812,18 +826,23 @@
   }
 
   function renderMemoExpandBox(node){
-    var boxW = 220, boxH = 150;
+    var size = getMemoBoxSize(node.id);
+    var boxW = size.w, boxH = size.h;
     var x = node.x + node.width - 20;
     var y = node.y - 10;
-    var fo = svgEl('foreignObject', { x: x, y: y, width: boxW, height: boxH, class: 'memo-expand-box' });
-    fo.addEventListener('mousedown', function(evt){ evt.stopPropagation(); });
-    fo.addEventListener('touchstart', function(evt){ evt.stopPropagation(); }, {passive:false});
+
+    var wrap = svgEl('g', { class: 'memo-expand-box', 'data-id': node.id });
+    wrap.addEventListener('mousedown', function(evt){ evt.stopPropagation(); });
+    wrap.addEventListener('touchstart', function(evt){ evt.stopPropagation(); }, {passive:false});
+
+    var fo = svgEl('foreignObject', { x: x, y: y, width: boxW, height: boxH });
     var div = document.createElement('div');
     div.className = 'memo-expand-content';
     var btn = document.createElement('button');
     btn.className = 'close-btn';
     btn.type = 'button';
-    btn.textContent = '折りたたむ';
+    btn.textContent = '×';
+    btn.title = '折りたたむ';
     btn.addEventListener('click', function(evt){ evt.stopPropagation(); toggleMemoExpand(node.id); });
     var body = document.createElement('div');
     body.className = 'memo-expand-body';
@@ -831,7 +850,23 @@
     div.appendChild(btn);
     div.appendChild(body);
     fo.appendChild(div);
-    return fo;
+    wrap.appendChild(fo);
+
+    var handleSize = 11;
+    var resizeHandle = svgEl('rect', {
+      x: x+boxW-handleSize, y: y+boxH-handleSize, width: handleSize, height: handleSize, rx: 2,
+      class: 'memo-expand-resize-handle'
+    });
+    resizeHandle.addEventListener('mousedown', function(evt){ onMemoExpandResizeMouseDown(evt, node, boxW, boxH); });
+    resizeHandle.addEventListener('touchstart', function(evt){ onMemoExpandResizeMouseDown(evt, node, boxW, boxH); }, {passive:false});
+    wrap.appendChild(resizeHandle);
+
+    return wrap;
+  }
+
+  function onMemoExpandResizeMouseDown(evt, node, boxW, boxH){
+    evt.preventDefault(); evt.stopPropagation();
+    resizingMemoBox = { nodeId: node.id, startWorld: screenToWorld(evt), startW: boxW, startH: boxH };
   }
 
   function truncate(s, n){ s = String(s); return s.length > n ? s.slice(0,n-1) + '…' : s; }
@@ -1003,6 +1038,7 @@
           '<span>'+ (node.pmid ? escHtml(node.pmid) : '取得なし') +'</span>' +
           (node.pmid ? '<a href="https://pubmed.ncbi.nlm.nih.gov/'+encodeURIComponent(node.pmid)+'/" target="_blank" rel="noopener noreferrer" id="f-pubmed-link">PubMedを開く</a>' : '') +
         '</dd>' +
+        '<dt>被引用数</dt><dd>'+ (node.cites != null ? node.cites.toLocaleString() + ' 回' : '取得なし') +'</dd>' +
       '</div>';
       html += fieldRow('メモ(鍵となる知見・引用文など)', '<textarea id="f-memo">'+escHtml(node.memo)+'</textarea>');
       html += nodeColorSwatchRowHtml(node);
@@ -1403,6 +1439,15 @@
         rnode.height = Math.max(MIN_NODE_HEIGHT, w2.y - rnode.y);
         renderQuiet();
       }
+    } else if (resizingMemoBox){
+      var w4 = screenToWorld(evt);
+      var dw = w4.x - resizingMemoBox.startWorld.x;
+      var dh = w4.y - resizingMemoBox.startWorld.y;
+      expandedMemoSizes[resizingMemoBox.nodeId] = {
+        w: Math.max(MEMO_BOX_MIN_W, resizingMemoBox.startW + dw),
+        h: Math.max(MEMO_BOX_MIN_H, resizingMemoBox.startH + dh)
+      };
+      renderQuiet();
     } else if (isPanning && panStart){
       view.x = eventPoint(evt).clientX - panStart.x;
       view.y = eventPoint(evt).clientY - panStart.y;
@@ -1425,6 +1470,7 @@
       }
     }
     if (resizing){ resizing = null; pushHistory(); render(); }
+    if (resizingMemoBox){ resizingMemoBox = null; render(); }
     isPanning = false; panStart = null;
   });
 
