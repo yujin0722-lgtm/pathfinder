@@ -50,7 +50,7 @@
   .node-shape.selected { stroke: var(--accent); stroke-width: 2.6; }
   .node-shape.type-question, .node-shape.type-conclusion { stroke-width: 2; }
   .node-shape.type-question.selected, .node-shape.type-conclusion.selected { stroke-width: 3; }
-  .node-label { font-size: 12px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: var(--ink); }
+  .node-label { font-size: var(--label-font-size, 12px); text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: var(--ink); }
   .resize-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; cursor: nwse-resize; }
 
   .edge-path { fill: none; stroke-width: 2; cursor: pointer; }
@@ -60,6 +60,19 @@
   .edge-label { font-size: 11px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
 
   #hint { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,0.9); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 12px; color: var(--sub); max-width: 360px; pointer-events: none; }
+  #hint.hidden { display: none; }
+
+  /* 凡例(Citrailと同じ、折りたたみ可能なパネル) */
+  #legend { position: absolute; left: 12px; top: 12px; max-width: 230px; background: rgba(255,255,255,.96); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px 10px; font-size: 11.5px; line-height: 1.5; box-shadow: 0 2px 8px rgba(28,43,51,.08); max-height: calc(100% - 60px); overflow-y: auto; }
+  #legend.hidden { display: none; }
+  #legend-toggle { border: none; background: none; padding: 4px 2px; font-size: 11.5px; color: var(--sub); cursor: pointer; font-weight: 600; width: 100%; text-align: left; }
+  #legend-toggle:hover { color: var(--accent); }
+  #legend.collapsed #legend-body { display: none; }
+  #legend h3 { font-size: 11px; color: var(--sub); font-weight: 600; margin: 6px 0 3px; }
+  #legend h3:first-child { margin-top: 0; }
+  .lg-row { display: flex; align-items: center; gap: 7px; }
+  .shape { width: 13px; height: 13px; flex: none; color: var(--sub); }
+  .arrow-note { margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line); color: var(--sub); }
 
   #proppanel-wrap { position: relative; flex: none; display: flex; }
   #proppanel { width: 300px; border-left: 1px solid var(--line); background: var(--panel); padding: 14px; overflow-y: auto; transition: width .15s, padding .15s; }
@@ -100,6 +113,7 @@
   .node-year-badge-bg { fill: #fff; stroke: var(--line); stroke-width: 1; }
   .node-year-badge { font-size: 12px; font-weight: 600; fill: var(--sub); text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
   .node-lock-badge { font-size: 11px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .node-type-badge { font-size: 14px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
   .node-outside-label { font-size: 11.5px; fill: var(--ink); text-anchor: middle; pointer-events: none; }
 
   /* エビデンスノードのメモ展開表示 */
@@ -160,6 +174,10 @@
       <button id="btn-zoomout" title="縮小"><span class="ic">-</span>縮小</button>
       <button id="btn-fit" title="全体が収まるように表示"><span class="ic">&#10530;</span>全体表示</button>
       <button id="btn-grid" title="背景のグリッド線を表示/非表示"><span class="ic">&#9638;</span>グリッド</button>
+      <button id="btn-legend" title="凡例の表示/非表示"><span class="ic">&#128209;</span>凡例</button>
+      <button id="btn-hint-toggle" title="下部の操作説明の表示/非表示"><span class="ic">&#128161;</span>ヒント</button>
+      <button id="btn-fontsize-dec" title="ノード内の文字を小さくする"><span class="ic">A-</span>文字小</button>
+      <button id="btn-fontsize-inc" title="ノード内の文字を大きくする"><span class="ic">A+</span>文字大</button>
       <button id="btn-layout-year" title="発表年に基づいてエビデンスノードを整列します(発表年のないノードは動きません)"><span class="ic">&#128197;</span>年代整列</button>
       <hr>
       <button id="btn-undo" title="元に戻す"><span class="ic">&#8630;</span>戻す</button>
@@ -173,7 +191,7 @@
             <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path>
           </marker>
           <pattern id="gridPattern" width="40" height="40" patternUnits="userSpaceOnUse">
-            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#DCE2E7" stroke-width="1"></path>
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#C3CDD5" stroke-width="1"></path>
           </pattern>
         </defs>
         <g id="viewport">
@@ -183,6 +201,27 @@
         </g>
       </svg>
       <div id="hint"></div>
+      <div id="legend">
+        <button id="legend-toggle" aria-expanded="true">凡例 <span id="legend-caret">▾</span></button>
+        <div id="legend-body">
+          <h3>形：研究の種類(PubMed分類/なければタイトルから暫定)</h3>
+          <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>RCT</div>
+          <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="7,1 12.5,4 12.5,10 7,13 1.5,10 1.5,4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>メタ解析・SR</div>
+          <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><rect x="1.5" y="3" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>レビュー</div>
+          <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="7,1.5 13,12.5 1,12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>観察研究</div>
+          <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="7,0.8 8.8,5.1 13.2,5.3 9.8,8.1 11,12.6 7,10.1 3,12.6 4.2,8.1 0.8,5.3 5.2,5.1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>ガイドライン</div>
+          <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="1,3.5 9.5,3.5 13,7 9.5,10.5 1,10.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>症例報告</div>
+          <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>その他・未定</div>
+          <h3>ノードの種類</h3>
+          <div class="lg-row">❓ 臨床疑問(青の二重枠)</div>
+          <div class="lg-row">✅ 自分の結論(緑の二重枠)</div>
+          <div class="lg-row">📝 メモノート(黄色・角折れ)</div>
+          <h3>線</h3>
+          <div class="lg-row">点線(グレー) ＝ 自動リンク(OpenAlexの引用関係、編集不可)</div>
+          <div class="lg-row">実線(色つき) ＝ 手動リンク(色・ラベルを自由に設定可能)</div>
+          <div class="arrow-note">矢印の先が、つながり先です。<br>ノード左上の数字＝出版年(エビデンスノードのみ)<br>🔒＝位置が固定されたノード<br>エビデンスノードをクリックするとメモが展開表示されます</div>
+        </div>
+      </div>
     </div>
 
     <div id="proppanel-wrap">
@@ -726,9 +765,11 @@
   // 改行(\n)は強制的な行区切りとして扱い、以降の内容も表示対象に含める。
   function wrapLabelLines(text, node){
     text = String(text || '');
-    var charWidth = 7.2; // 12pxフォントでのおおよその1文字あたりの幅(px)
+    var fontScale = labelFontSize / 12;
+    var charWidth = 7.2 * fontScale; // 12pxフォントでのおおよその1文字あたりの幅(px)を現在の文字サイズに合わせて拡縮
+    var lineHeightForWrap = 15 * fontScale;
     var maxCharsPerLine = Math.max(3, Math.floor((node.width - 14) / charWidth));
-    var maxLines = Math.max(1, Math.floor((node.height - 16) / 15));
+    var maxLines = Math.max(1, Math.floor((node.height - 16) / lineHeightForWrap));
     var allLines = [];
     text.split('\n').forEach(function(para){
       if (para === ''){ allLines.push(''); return; }
@@ -771,11 +812,15 @@
       // 二重枠の内側の線
       var inner = svgEl('rect', { x: node.x+5, y: node.y+5, width: node.width-10, height: node.height-10, rx:5, ry:5, fill:'none', stroke:'#666', 'stroke-width':1 });
       g.appendChild(inner);
+      // 色以外でも見分けられるよう、左上に種類アイコンを表示(❓=臨床疑問, ✅=自分の結論)
+      var typeIcon = svgEl('text', { x: node.x+15, y: node.y+15, class: 'node-type-badge' });
+      typeIcon.textContent = (node.nodeType === 'question') ? '❓' : '✅';
+      g.appendChild(typeIcon);
     }
 
     var cx = node.x + node.width/2, cy = node.y + node.height/2;
     var lines = wrapLabelLines(nodeLabelText(node), node);
-    var lineHeight = 15;
+    var lineHeight = 15 * (labelFontSize / 12);
     var label = svgEl('text', { x: cx, y: cy, class: 'node-label' });
     var startDy = -(lines.length-1) * lineHeight / 2;
     lines.forEach(function(line, i){
@@ -1322,10 +1367,11 @@
     styleEl.textContent =
       '.node-shape{stroke:#666;stroke-width:1.3;}' +
       '.node-shape.type-question,.node-shape.type-conclusion{stroke-width:2;}' +
-      '.node-label{font-size:12px;text-anchor:middle;dominant-baseline:middle;fill:#1C2B33;font-family:sans-serif;}' +
+      '.node-label{font-size:'+labelFontSize+'px;text-anchor:middle;dominant-baseline:middle;fill:#1C2B33;font-family:sans-serif;}' +
       '.node-year-badge-bg{fill:#fff;stroke:#DDE5EA;stroke-width:1;}' +
       '.node-year-badge{font-size:12px;font-weight:600;fill:#5B6B77;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}' +
       '.node-lock-badge{font-size:11px;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}' +
+      '.node-type-badge{font-size:14px;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}' +
       '.node-outside-label{font-size:11.5px;fill:#1C2B33;text-anchor:middle;font-family:sans-serif;}' +
       '.edge-path{fill:none;stroke-width:2;}' +
       '.edge-label-bg{fill:#fff;stroke:#ccc;stroke-width:1;}' +
@@ -1528,6 +1574,65 @@
     try { if (HAS_STORAGE) localStorage.setItem(GRID_PREF_KEY, gridVisible ? '1' : '0'); } catch(e){}
   });
   applyGridVisibility();
+
+  /* ---- 操作説明(ヒント)の表示切替 ---- */
+  var HINT_PREF_KEY = 'pf_hint_visible';
+  var hintVisible = true;
+  try { hintVisible = !HAS_STORAGE || localStorage.getItem(HINT_PREF_KEY) !== '0'; } catch(e){}
+  function applyHintVisibility(){
+    hintEl.classList.toggle('hidden', !hintVisible);
+    document.getElementById('btn-hint-toggle').classList.toggle('active', hintVisible);
+  }
+  document.getElementById('btn-hint-toggle').addEventListener('click', function(){
+    hintVisible = !hintVisible;
+    applyHintVisibility();
+    try { if (HAS_STORAGE) localStorage.setItem(HINT_PREF_KEY, hintVisible ? '1' : '0'); } catch(e){}
+  });
+  applyHintVisibility();
+
+  /* ---- 凡例の表示切替(全体の表示/非表示はボタンで、見出しクリックで折りたたみもできる。Citrailと同じ方式) ---- */
+  var LEGEND_PREF_KEY = 'pf_legend_visible';
+  var legendEl = document.getElementById('legend');
+  var legendVisible = true;
+  try { legendVisible = !HAS_STORAGE || localStorage.getItem(LEGEND_PREF_KEY) !== '0'; } catch(e){}
+  function applyLegendVisibility(){
+    legendEl.classList.toggle('hidden', !legendVisible);
+    document.getElementById('btn-legend').classList.toggle('active', legendVisible);
+  }
+  document.getElementById('btn-legend').addEventListener('click', function(){
+    legendVisible = !legendVisible;
+    applyLegendVisibility();
+    try { if (HAS_STORAGE) localStorage.setItem(LEGEND_PREF_KEY, legendVisible ? '1' : '0'); } catch(e){}
+  });
+  applyLegendVisibility();
+  document.getElementById('legend-toggle').addEventListener('click', function(){
+    var collapsed = legendEl.classList.toggle('collapsed');
+    document.getElementById('legend-toggle').setAttribute('aria-expanded', String(!collapsed));
+    document.getElementById('legend-caret').textContent = collapsed ? '▸' : '▾';
+  });
+
+  /* ---- ノード内文字の大きさ変更 ---- */
+  var LABEL_FONT_KEY = 'pf_label_font_size';
+  var LABEL_FONT_MIN = 9, LABEL_FONT_MAX = 20, LABEL_FONT_DEFAULT = 12;
+  var labelFontSize = LABEL_FONT_DEFAULT;
+  try {
+    var savedFont = HAS_STORAGE ? parseInt(localStorage.getItem(LABEL_FONT_KEY), 10) : NaN;
+    if (!isNaN(savedFont) && savedFont >= LABEL_FONT_MIN && savedFont <= LABEL_FONT_MAX) labelFontSize = savedFont;
+  } catch(e){}
+  function applyLabelFontSize(){
+    svg.style.setProperty('--label-font-size', labelFontSize + 'px');
+    try { if (HAS_STORAGE) localStorage.setItem(LABEL_FONT_KEY, String(labelFontSize)); } catch(e){}
+    render();
+  }
+  document.getElementById('btn-fontsize-dec').addEventListener('click', function(){
+    labelFontSize = Math.max(LABEL_FONT_MIN, labelFontSize - 1);
+    applyLabelFontSize();
+  });
+  document.getElementById('btn-fontsize-inc').addEventListener('click', function(){
+    labelFontSize = Math.min(LABEL_FONT_MAX, labelFontSize + 1);
+    applyLabelFontSize();
+  });
+  applyLabelFontSize();
 
   /* ---- プロパティパネルの開閉 ---- */
   var panelWrapEl = document.getElementById('proppanel-wrap');
