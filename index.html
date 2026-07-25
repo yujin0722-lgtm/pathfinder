@@ -1300,7 +1300,8 @@
       (groups[y] = groups[y] || []).push(n);
     });
     Object.keys(groups).forEach(function(yearKey){
-      var group = groups[yearKey];
+      // 同じ年の中では被引用数が少ない順(軽い→重い)に上から下へ並べる(目安の整列であり、値そのものはY座標に比例させない)
+      var group = groups[yearKey].slice().sort(function(a,b){ return (a.cites||0) - (b.cites||0); });
       var x = (parseInt(yearKey,10) - minYear) * xScale;
       var startY = -((group.length-1) * vGap) / 2;
       group.forEach(function(n, i){
@@ -1336,7 +1337,8 @@
       (groups[y] = groups[y] || []).push(n);
     });
     Object.keys(groups).forEach(function(yearKey){
-      var group = groups[yearKey];
+      // 同じ年の中では被引用数が少ない順(軽い→重い)に上から下へ並べる
+      var group = groups[yearKey].slice().sort(function(a,b){ return (a.cites||0) - (b.cites||0); });
       var x = baseX + (parseInt(yearKey,10) - minYear) * xScale;
       group.forEach(function(n, i){
         n.x = x - n.width/2;
