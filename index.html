@@ -39,7 +39,7 @@
   svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; }
   svg#canvas.mode-add cursor: copy;
   svg#canvas.mode-add-paper, svg#canvas.mode-add-question, svg#canvas.mode-add-conclusion, svg#canvas.mode-add-memo { cursor: copy; }
-  svg#canvas.mode-add-edge { cursor: crosshair; }
+  svg#canvas.mode-add-edge, svg#canvas.mode-pick-year-origin { cursor: crosshair; }
   svg#canvas.mode-pan { cursor: grab; }
 
   /* グリッド背景: ノード・リンクより必ず後ろに描画され、クリックも一切奪わないようにする */
@@ -1220,8 +1220,8 @@
     for (var i=0;i<buttons.length;i++){
       buttons[i].classList.toggle('active', buttons[i].getAttribute('data-tool')===t);
     }
-    svg.classList.remove('mode-add-paper','mode-add-question','mode-add-conclusion','mode-add-memo','mode-add-edge','mode-pan');
-    if (t.indexOf('add-')===0) svg.classList.add('mode-'+t);
+    svg.classList.remove('mode-add-paper','mode-add-question','mode-add-conclusion','mode-add-memo','mode-add-edge','mode-pan','mode-pick-year-origin');
+    if (t.indexOf('add-')===0 || t === 'pick-year-origin') svg.classList.add('mode-'+t);
     updateHint();
   }
   function updateHint(){
@@ -1231,7 +1231,8 @@
       'add-question': 'キャンバスをクリックすると臨床疑問ノードを追加します(地図に1つまで)。',
       'add-conclusion': 'キャンバスをクリックすると自分の結論ノードを追加します(地図に1つまで)。',
       'add-memo': 'キャンバスをクリックするとメモノートを追加します。',
-      'add-edge': '始点ノード→終点ノードの順にクリックするとリンクを作成します。'
+      'add-edge': '始点ノード→終点ノードの順にクリックするとリンクを作成します。',
+      'pick-year-origin': '整列の基準にしたい位置(既存のノードでも空白でも可)をクリックしてください。そこを左上として、右下方向に年代(横)×被引用数(縦)で並びます。'
     };
     hintEl.textContent = msgs[tool] || '';
   }
@@ -1277,8 +1278,9 @@
   }
 
   /* 発表年に基づいてエビデンスノードを一度だけ整列する(常時動く物理演算ではない)。
-     発表年のないノード(臨床疑問・結論・メモ、年未入力のエビデンス)は対象外で今の位置のまま。
-     同じ年のノードは重ならないよう縦に並べる。 */
+     発表年のないノード(臨床疑問・結論・メモ、年未入力のエビデンス、位置固定ノード)は対象外で今の位置のまま。
+     ボタンを押すと、まず基準にしたい原点をキャンバス上でクリックしてもらい(pick-year-originモード)、
+     その点を左上として右下方向に年代(横)×被引用数(縦、少ない順)で並べる。 */
   function layoutByYear(){
     var dated = state.nodes.filter(function(n){
       return n.nodeType === 'paper' && !n.locked && n.year && !isNaN(parseInt(n.year,10));
@@ -1287,6 +1289,14 @@
       alert('発表年が入力されている、位置固定されていないエビデンスノードが2件以上ないと整列できません。');
       return;
     }
+    setTool('pick-year-origin');
+  }
+
+  function runLayoutByYearFromOrigin(origin){
+    var dated = state.nodes.filter(function(n){
+      return n.nodeType === 'paper' && !n.locked && n.year && !isNaN(parseInt(n.year,10));
+    });
+    if (dated.length < 2) return;
     var years = dated.map(function(n){ return parseInt(n.year,10); });
     var minYear = Math.min.apply(null, years), maxYear = Math.max.apply(null, years);
     var yearSpan = Math.max(maxYear - minYear, 1);
@@ -1300,12 +1310,12 @@
       (groups[y] = groups[y] || []).push(n);
     });
     Object.keys(groups).forEach(function(yearKey){
-      var group = groups[yearKey];
-      var x = (parseInt(yearKey,10) - minYear) * xScale;
-      var startY = -((group.length-1) * vGap) / 2;
+      // 同じ年の中では被引用数が少ない順(軽い→重い)に上から下へ並べる(目安の整列であり、値そのものはY座標に比例させない)
+      var group = groups[yearKey].slice().sort(function(a,b){ return (a.cites||0) - (b.cites||0); });
+      var x = origin.x + (parseInt(yearKey,10) - minYear) * xScale;
       group.forEach(function(n, i){
-        n.x = x - n.width/2;
-        n.y = startY + i*vGap - n.height/2;
+        n.x = x;
+        n.y = origin.y + i*vGap;
       });
     });
     pushHistory();
@@ -1336,7 +1346,8 @@
       (groups[y] = groups[y] || []).push(n);
     });
     Object.keys(groups).forEach(function(yearKey){
-      var group = groups[yearKey];
+      // 同じ年の中では被引用数が少ない順(軽い→重い)に上から下へ並べる
+      var group = groups[yearKey].slice().sort(function(a,b){ return (a.cites||0) - (b.cites||0); });
       var x = baseX + (parseInt(yearKey,10) - minYear) * xScale;
       group.forEach(function(n, i){
         n.x = x - n.width/2;
@@ -1423,6 +1434,11 @@
   /* ---- マウス/タッチ操作 ---- */
   function onNodeMouseDown(evt, node){
     evt.preventDefault(); evt.stopPropagation();
+    if (tool === 'pick-year-origin'){
+      runLayoutByYearFromOrigin({ x: node.x, y: node.y });
+      setTool('select');
+      return;
+    }
     if (tool === 'add-edge'){
       if (!edgeDraftSource){
         edgeDraftSource = node.id;
@@ -1454,6 +1470,12 @@
 
   svg.addEventListener('mousedown', function(evt){
     if (evt.target !== svg && evt.target !== viewport && evt.target.id !== 'canvas') return;
+    if (tool === 'pick-year-origin'){
+      var origin = screenToWorld(evt);
+      runLayoutByYearFromOrigin(origin);
+      setTool('select');
+      return;
+    }
     if (tool.indexOf('add-') === 0 && tool !== 'add-edge'){
       var nodeType = tool.replace('add-','');
       if ((nodeType==='question' && hasNodeOfType('question')) || (nodeType==='conclusion' && hasNodeOfType('conclusion'))) return;
