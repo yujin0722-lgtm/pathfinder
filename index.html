@@ -134,9 +134,13 @@
 
   #statusbar { flex: none; height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--sub); background: var(--panel); }
 
-  #mapsModal { display: none; position: fixed; inset: 0; background: rgba(28,43,51,0.45); align-items: center; justify-content: center; z-index: 50; }
-  #mapsModal .box { background: var(--panel); border-radius: 10px; padding: 20px; width: 440px; max-height: 70vh; overflow-y: auto; }
-  #mapsModal h3 { margin: 0 0 12px; font-size: 15px; }
+  #mapsModal, #batchAddModal { display: none; position: fixed; inset: 0; background: rgba(28,43,51,0.45); align-items: center; justify-content: center; z-index: 50; }
+  #mapsModal .box, #batchAddModal .box { background: var(--panel); border-radius: 10px; padding: 20px; width: 440px; max-height: 70vh; overflow-y: auto; }
+  #mapsModal h3, #batchAddModal h3 { margin: 0 0 12px; font-size: 15px; }
+  #batchAddModal .hint { font-size: 12px; color: var(--sub); margin: 0 0 8px; }
+  #batch-add-input { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; }
+  #batch-add-status { font-size: 12px; color: var(--sub); margin-top: 8px; white-space: pre-wrap; }
+  #batchAddModal .btn-row { display: flex; gap: 8px; margin-top: 14px; }
   .map-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); gap: 10px; }
   .map-row .meta { font-size: 12px; color: var(--sub); }
   .map-row .name { font-size: 13px; }
@@ -174,6 +178,7 @@
     <div id="toolbar">
       <button data-tool="select" class="active" title="選択">選択</button>
       <button data-tool="add-paper" title="エビデンスノードを追加">エビデンス追加</button>
+      <button id="btn-batch-add" title="DOIまたはPMIDを複数まとめて入力し、エビデンスノードとして追加します">複数追加</button>
       <button data-tool="add-question" id="btn-add-question" title="臨床疑問ノードを追加(地図に1つまで)">疑問を追加</button>
       <button data-tool="add-conclusion" id="btn-add-conclusion" title="自分の結論ノードを追加(地図に1つまで)">結論を追加</button>
       <button data-tool="add-memo" title="メモノートを追加">メモ追加</button>
@@ -254,6 +259,19 @@
       <h3>地図一覧</h3>
       <div id="mapsList"></div>
       <button id="btn-close-maps" style="margin-top:14px;">閉じる</button>
+    </div>
+  </div>
+
+  <div id="batchAddModal">
+    <div class="box">
+      <h3>複数のエビデンスをまとめて追加</h3>
+      <p class="hint">DOIまたはPMIDを1行に1件ずつ入力してください(URL形式・「doi:」「pmid:」付きも可)。</p>
+      <textarea id="batch-add-input" rows="10" placeholder="10.1001/xxxxx&#10;pmid:12345678&#10;https://pubmed.ncbi.nlm.nih.gov/23456789/"></textarea>
+      <div id="batch-add-status"></div>
+      <div class="btn-row">
+        <button id="btn-batch-add-run">取得して追加</button>
+        <button id="btn-batch-add-close">閉じる</button>
+      </div>
     </div>
   </div>
 
@@ -557,14 +575,21 @@
   function stripDoiUrl(u){ return u ? String(u).replace(/^https?:\/\/(?:dx\.)?doi\.org\//i,'') : null; }
   function extractPmid(u){ if (!u) return null; var m = String(u).match(/(\d+)\s*\/?\s*$/); return m ? m[1] : null; }
 
-  function normalizeDoi(raw){
+  /* DOIまたはPMIDのどちらでも受け付ける(CitrailのnormalizeInput()と同じ判定ロジック)。
+     単体のDOI取得ボタンと複数追加機能の両方から共有して使う。 */
+  function normalizeDoiOrPmid(raw){
     var s = (raw||'').trim();
     if (!s) return null;
     var m = s.match(/^https?:\/\/(?:dx\.)?doi\.org\/(10\..+)$/i);
-    if (m) return decodeURIComponent(m[1]);
+    if (m) return { type: 'doi', value: decodeURIComponent(m[1]) };
     m = s.match(/^doi:\s*(10\..+)$/i);
-    if (m) return m[1].trim();
-    if (/^10\.\S+\/\S+/.test(s)) return s;
+    if (m) return { type: 'doi', value: m[1].trim() };
+    if (/^10\.\S+\/\S+/.test(s)) return { type: 'doi', value: s };
+    m = s.match(/^https?:\/\/(?:www\.)?pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)\/?/i);
+    if (m) return { type: 'pmid', value: m[1] };
+    m = s.match(/^pmid:?\s*(\d+)$/i);
+    if (m) return { type: 'pmid', value: m[1] };
+    if (/^\d{1,9}$/.test(s)) return { type: 'pmid', value: s };
     return null;
   }
 
@@ -629,14 +654,18 @@
     }
   }
 
-  function fetchAndApplyDoi(node, doiRaw){
-    var doi = normalizeDoi(doiRaw);
-    if (!doi){ alert('DOIの形式を確認してください(例: 10.1001/xxxxx)'); return; }
+  function identifierApiPath(norm){
+    return norm.type === 'doi' ? '/works/doi:' + encodeURIComponent(norm.value) : '/works/pmid:' + norm.value;
+  }
+
+  function fetchAndApplyIdentifier(node, raw){
+    var norm = normalizeDoiOrPmid(raw);
+    if (!norm){ alert('DOIまたはPMIDの形式を確認してください(例: 10.1001/xxxxx、またはPMIDの番号)'); return; }
     var btn = document.getElementById('f-doi-fetch');
     if (btn){ btn.disabled = true; btn.textContent = '取得中…'; }
-    apiGet('/works/doi:' + encodeURIComponent(doi), { select: OPENALEX_SELECT }).then(function(w){
+    apiGet(identifierApiPath(norm), { select: OPENALEX_SELECT }).then(function(w){
       var p = toPaperFields(w);
-      node.doi = p.doi || doi;
+      node.doi = p.doi || (norm.type === 'doi' ? norm.value : node.doi);
       node.title = p.title;
       node.authors = p.authors;
       node.year = p.year;
@@ -644,9 +673,9 @@
       node.studyType = p.studyType;
       node.openalexId = p.openalexId;
       node.referencedWorks = p.referencedWorks;
-      node.pmid = p.pmid;
+      node.pmid = p.pmid || (norm.type === 'pmid' ? norm.value : node.pmid);
       node.cites = p.cites;
-      return (p.pmid ? fetchPubTypeCategory(p.pmid) : Promise.resolve(null)).then(function(cat){
+      return (node.pmid ? fetchPubTypeCategory(node.pmid) : Promise.resolve(null)).then(function(cat){
         if (cat) node.studyType = cat;
         recomputeAutoLinks();
         pushHistory();
@@ -1132,7 +1161,7 @@
         }).join('') + '</select>' +
         '<input type="text" id="f-title" class="p-title-input" value="'+escAttr(node.title)+'">' +
       '</div>';
-      html += '<label>DOI(任意)</label><div style="display:flex;gap:6px;"><input type="text" id="f-doi" value="'+escAttr(node.doi)+'" style="flex:1;" placeholder="10.1001/xxxxx"><button id="f-doi-fetch" style="flex:none;" title="OpenAlexから書誌情報を取得">取得</button></div>';
+      html += '<label>DOIまたはPMID(任意)</label><div style="display:flex;gap:6px;"><input type="text" id="f-doi" value="'+escAttr(node.doi)+'" style="flex:1;" placeholder="10.1001/xxxxx または PMID"><button id="f-doi-fetch" style="flex:none;" title="OpenAlexから書誌情報を取得">取得</button></div>';
       html += '<div class="node-dl">' +
         '<dt>著者</dt><dd><input type="text" id="f-authors" value="'+escAttr(node.authors)+'"></dd>' +
         '<dt>発表年</dt><dd><input type="text" id="f-year" value="'+escAttr(node.year)+'"></dd>' +
@@ -1159,7 +1188,7 @@
     if (node.nodeType === 'paper'){
       wireInput('f-doi', function(v){ node.doi = v; });
       document.getElementById('f-doi-fetch').addEventListener('click', function(){
-        fetchAndApplyDoi(node, document.getElementById('f-doi').value);
+        fetchAndApplyIdentifier(node, document.getElementById('f-doi').value);
       });
       wireInput('f-title', function(v){ node.title = v; renderQuiet(); });
       wireInput('f-authors', function(v){ node.authors = v; });
@@ -1764,6 +1793,10 @@
   document.getElementById('btn-maps').addEventListener('click', openMapsModal);
   document.getElementById('btn-close-maps').addEventListener('click', closeMapsModal);
 
+  document.getElementById('btn-batch-add').addEventListener('click', openBatchAddModal);
+  document.getElementById('btn-batch-add-close').addEventListener('click', closeBatchAddModal);
+  document.getElementById('btn-batch-add-run').addEventListener('click', runBatchAdd);
+
   document.getElementById('btn-export-json').addEventListener('click', function(){
     var payload = Object.assign({}, state, { exportedAt: new Date().toISOString() });
     var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1846,6 +1879,82 @@
     if (skipped > 0){
       alert(added + '件を追加しました。' + skipped + '件はすでにこの地図にあるエビデンスと同じ(DOI・PMID・OpenAlex IDが一致)ため、重複して追加しませんでした。');
     }
+  }
+
+  /* ---- 複数追加(DOI/PMIDを1行ずつまとめて入力し、OpenAlexから取得してエビデンスノードを一括作成) ---- */
+  function openBatchAddModal(){
+    document.getElementById('batch-add-status').textContent = '';
+    document.getElementById('batchAddModal').style.display = 'flex';
+  }
+  function closeBatchAddModal(){
+    document.getElementById('batchAddModal').style.display = 'none';
+  }
+
+  function runBatchAdd(){
+    var textarea = document.getElementById('batch-add-input');
+    var lines = textarea.value.split('\n').map(function(s){ return s.trim(); }).filter(Boolean);
+    if (!lines.length){ alert('DOIまたはPMIDを1行に1件ずつ入力してください。'); return; }
+
+    var statusEl = document.getElementById('batch-add-status');
+    var runBtn = document.getElementById('btn-batch-add-run');
+    runBtn.disabled = true;
+
+    var existingBounds = computeContentBounds();
+    var x0 = 120, y0 = 120, added = 0, skipped = 0;
+    var failed = [];
+    var newNodes = [];
+
+    function finish(){
+      runBtn.disabled = false;
+      recomputeAutoLinks();
+      layoutNewImportedNodes(newNodes, existingBounds);
+      pushHistory();
+      render();
+      fitToView();
+      var msg = added + '件を追加しました。';
+      if (skipped) msg += '\n' + skipped + '件はすでにこの地図にあるエビデンスと同じ(DOI・PMID・OpenAlex IDが一致)ため、重複して追加しませんでした。';
+      if (failed.length) msg += '\n取得できなかった項目(' + failed.length + '件):\n' + failed.join('\n');
+      statusEl.textContent = msg;
+      if (added > 0 && !failed.length && !skipped) textarea.value = '';
+    }
+
+    function processNext(i){
+      if (i >= lines.length){ finish(); return; }
+      var raw = lines[i];
+      statusEl.textContent = '(' + (i+1) + '/' + lines.length + ') 取得中: ' + raw;
+      var norm = normalizeDoiOrPmid(raw);
+      if (!norm){
+        failed.push(raw + ' → DOI/PMIDとして認識できませんでした');
+        processNext(i+1);
+        return;
+      }
+      apiGet(identifierApiPath(norm), { select: OPENALEX_SELECT }).then(function(w){
+        var p = toPaperFields(w);
+        var cp = { doi: p.doi, pmid: p.pmid, id: p.openalexId };
+        if (findExistingPaperNode(cp)){ skipped++; processNext(i+1); return; }
+        return (p.pmid ? fetchPubTypeCategory(p.pmid) : Promise.resolve(null)).then(function(cat){
+          var node = createNode('paper', x0 + (added % 4) * 190, y0 + Math.floor(added/4) * 130);
+          node.title = p.title;
+          node.authors = p.authors;
+          node.year = p.year;
+          node.journal = p.journal;
+          node.doi = p.doi || (norm.type === 'doi' ? norm.value : '');
+          node.pmid = p.pmid || (norm.type === 'pmid' ? norm.value : '');
+          node.openalexId = p.openalexId;
+          node.referencedWorks = p.referencedWorks || [];
+          node.studyType = cat || p.studyType;
+          node.cites = p.cites;
+          state.nodes.push(node);
+          newNodes.push(node);
+          added++;
+          processNext(i+1);
+        });
+      }).catch(function(e){
+        failed.push(raw + ' → ' + apiErrorMessage(e));
+        processNext(i+1);
+      });
+    }
+    processNext(0);
   }
 
   function checkIncomingHandoff(){
