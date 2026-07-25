@@ -1304,19 +1304,13 @@
     var xScale = totalWidth / yearSpan;
     var vGap = 150;
 
-    var groups = {};
-    dated.forEach(function(n){
-      var y = parseInt(n.year,10);
-      (groups[y] = groups[y] || []).push(n);
-    });
-    Object.keys(groups).forEach(function(yearKey){
-      // 同じ年の中では被引用数が少ない順(軽い→重い)に上から下へ並べる(目安の整列であり、値そのものはY座標に比例させない)
-      var group = groups[yearKey].slice().sort(function(a,b){ return (a.cites||0) - (b.cites||0); });
-      var x = origin.x + (parseInt(yearKey,10) - minYear) * xScale;
-      group.forEach(function(n, i){
-        n.x = x;
-        n.y = origin.y + i*vGap;
-      });
+    // 同じ年の中だけで比べるのではなく、年代に関わらず全ノードをまとめて被引用数の少ない順(軽い→重い)に
+    // 縦へ並べる。こうすることで年代をまたいだ重さの違いも見えるようになり、また各ノードが基本的に
+    // 別々の高さになるため、リンクが同じ高さに集中して重なり見えなくなることも避けられる。
+    var ranked = dated.slice().sort(function(a,b){ return (a.cites||0) - (b.cites||0); });
+    ranked.forEach(function(n, i){
+      n.x = origin.x + (parseInt(n.year,10) - minYear) * xScale;
+      n.y = origin.y + i*vGap;
     });
     pushHistory();
     render();
@@ -1340,19 +1334,12 @@
     var baseX = existingBounds ? existingBounds.minX : 0;
     var baseY = existingBounds ? existingBounds.maxY + 150 : 0;
 
-    var groups = {};
-    dated.forEach(function(n){
-      var y = parseInt(n.year,10);
-      (groups[y] = groups[y] || []).push(n);
-    });
-    Object.keys(groups).forEach(function(yearKey){
-      // 同じ年の中では被引用数が少ない順(軽い→重い)に上から下へ並べる
-      var group = groups[yearKey].slice().sort(function(a,b){ return (a.cites||0) - (b.cites||0); });
-      var x = baseX + (parseInt(yearKey,10) - minYear) * xScale;
-      group.forEach(function(n, i){
-        n.x = x - n.width/2;
-        n.y = baseY + i*vGap;
-      });
+    // 年代に関わらず全ノードをまとめて被引用数の少ない順(軽い→重い)に縦へ並べる(手動の年代整列と同じ考え方)
+    var ranked = dated.slice().sort(function(a,b){ return (a.cites||0) - (b.cites||0); });
+    ranked.forEach(function(n, i){
+      var x = baseX + (parseInt(n.year,10) - minYear) * xScale;
+      n.x = x - n.width/2;
+      n.y = baseY + i*vGap;
     });
   }
 
