@@ -1752,6 +1752,7 @@
       node.openalexId = cp.id || null;
       node.referencedWorks = Array.isArray(cp.referencedWorks) ? cp.referencedWorks : [];
       node.studyType = (STUDY_TYPES.indexOf(cp.study) !== -1) ? cp.study : 'OTHER';
+      node.cites = (cp.cites != null) ? cp.cites : null;
       state.nodes.push(node);
       newNodes.push(node);
       added++;
