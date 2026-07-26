@@ -38,7 +38,7 @@
   #canvas-wrap { flex: 1; position: relative; background: var(--canvas); overflow: hidden; }
   svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; }
   svg#canvas.mode-add cursor: copy;
-  svg#canvas.mode-add-paper, svg#canvas.mode-add-question, svg#canvas.mode-add-conclusion, svg#canvas.mode-add-memo { cursor: copy; }
+  svg#canvas.mode-add-paper, svg#canvas.mode-add-question, svg#canvas.mode-add-conclusion, svg#canvas.mode-add-memo, svg#canvas.mode-add-axis { cursor: copy; }
   svg#canvas.mode-add-edge, svg#canvas.mode-pick-year-origin { cursor: crosshair; }
   svg#canvas.mode-pan { cursor: grab; }
 
@@ -55,6 +55,12 @@
   .node-shape.type-conclusion.selected { stroke-width: 5; }
   .node-label { text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: var(--ink); }
   .resize-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; cursor: nwse-resize; }
+
+  /* 原点・軸表示アノテーション(L字の矢印。原点＋年代/被引用数の向きを示す注釈) */
+  .axis-hitbox { fill: transparent; cursor: move; }
+  .axis-hitbox.selected { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4,3; }
+  .axis-arrow { stroke: #333; stroke-width: 2; fill: none; pointer-events: none; }
+  .axis-label { font-size: 12px; fill: #333; pointer-events: none; }
 
   .edge-path { fill: none; stroke-width: 2; cursor: pointer; }
   .edge-path.manual { stroke-width: 3; }
@@ -177,12 +183,13 @@
   <div id="main">
     <div id="toolbar">
       <button data-tool="select" class="active" title="選択">選択</button>
-      <button data-tool="add-paper" title="エビデンスノードを追加">エビデンス追加</button>
+      <button data-tool="add-paper" title="エビデンスノードを追加">ノード</button>
       <button id="btn-batch-add" title="DOIまたはPMIDを複数まとめて入力し、エビデンスノードとして追加します">複数追加</button>
-      <button data-tool="add-question" id="btn-add-question" title="臨床疑問ノードを追加(地図に1つまで)">疑問を追加</button>
-      <button data-tool="add-conclusion" id="btn-add-conclusion" title="自分の結論ノードを追加(地図に1つまで)">結論を追加</button>
-      <button data-tool="add-memo" title="メモノートを追加">メモ追加</button>
+      <button data-tool="add-question" id="btn-add-question" title="臨床疑問ノードを追加(地図に1つまで)">疑問</button>
+      <button data-tool="add-conclusion" id="btn-add-conclusion" title="自分の結論ノードを追加(地図に1つまで)">結論</button>
+      <button data-tool="add-memo" title="メモノートを追加">メモ</button>
       <button data-tool="add-edge" title="2つのノードを線でつなぐ">線を引く</button>
+      <button data-tool="add-axis" id="btn-add-axis" title="原点と軸の向き(Year/Citation)を示す注釈を追加(地図に1つまで)">原点</button>
       <hr>
       <button id="btn-zoomin" title="拡大">拡大</button>
       <button id="btn-zoomout" title="縮小">縮小</button>
@@ -190,8 +197,9 @@
       <button id="btn-grid" title="背景のグリッド線を表示/非表示">グリッド</button>
       <button id="btn-legend" title="凡例の表示/非表示">凡例</button>
       <button id="btn-hint-toggle" title="下部の操作説明の表示/非表示">ヒント</button>
-      <button id="btn-autolink-toggle" title="自動リンク(OpenAlexの引用関係)の表示/非表示">自動リンク</button>
-      <button id="btn-layout-year" title="発表年に基づいてエビデンスノードを整列します(発表年のないノードは動きません)">年代整列</button>
+      <button id="btn-autolink-toggle" title="自動リンク(OpenAlexの引用関係)の表示/非表示">引用関係</button>
+      <button id="btn-toggle-all-memos" title="メモがある全てのエビデンスノードのメモ展開を一括で表示/非表示します(個別のダブルクリックでの開閉も引き続き使えます)">メモ一括</button>
+      <button id="btn-layout-year" title="発表年に基づいてエビデンスノードを整列します(発表年のないノードは動きません)">自動整列</button>
       <hr>
       <button id="btn-undo" title="元に戻す">元に戻す</button>
       <button id="btn-redo" title="やり直し">やり直し</button>
@@ -665,6 +673,14 @@
     if (btn){ btn.disabled = true; btn.textContent = '取得中…'; }
     apiGet(identifierApiPath(norm), { select: OPENALEX_SELECT }).then(function(w){
       var p = toPaperFields(w);
+      var dup = findExistingPaperNode({ doi: p.doi, pmid: p.pmid, id: p.openalexId }, node);
+      if (dup){
+        var proceed = window.confirm('この地図には既に同じ論文のノードがあります:\n「' + (dup.title || '(無題)') + '」\n\nそれでもこのノードに取得内容を上書きしますか？');
+        if (!proceed){
+          if (btn){ btn.disabled = false; btn.textContent = '取得'; }
+          return;
+        }
+      }
       node.doi = p.doi || (norm.type === 'doi' ? norm.value : node.doi);
       node.title = p.title;
       node.authors = p.authors;
@@ -707,7 +723,8 @@
     paper:      { width: 150, height: 74, color: '#ffffff' },
     question:   { width: 170, height: 84, color: '#cfe9fb' },
     conclusion: { width: 170, height: 84, color: '#d7f0d8' },
-    memo:       { width: 140, height: 74, color: '#fff4c2' }
+    memo:       { width: 140, height: 74, color: '#fff4c2' },
+    axis:       { width: 120, height: 90, color: '#ffffff' }
   };
 
   function createNode(nodeType, x, y){
@@ -792,7 +809,7 @@
 
   // エビデンスノードの中に表示する短い抜粋。優先順位: PMID → メモの冒頭 → タイトルの冒頭
   function nodeInsideExcerpt(node){
-    if (node.pmid) return 'PMID ' + node.pmid;
+    if (node.pmid) return node.pmid;
     var src = (node.memo && node.memo.trim()) ? node.memo.trim() : (node.title || '');
     src = src.replace(/\n/g, ' ');
     return truncate(src, 10) || '(空)';
@@ -803,23 +820,38 @@
     return node.text || '(空)';
   }
 
-  // 日本語は単語区切りがないため、ノードの大きさに応じて文字数ベースで折り返す。
-  // 改行(\n)は強制的な行区切りとして扱い、以降の内容も表示対象に含める。
-  function wrapLabelLines(text, node){
+  // 日本語は単語区切りがないため、ノードの大きさに応じて折り返す。改行(\n)は強制的な行区切りとして扱う。
+  // 全角文字(日本語など)はほぼ正方形の幅、半角文字(英数字など)はその半分程度の幅、というように
+  // 文字ごとの実際の見た目の幅を概算して折り返し位置を決める(全角換算の文字数だけで折り返すと、
+  // 日本語の文章では実際の幅を過小評価してノードの外にはみ出てしまうため)。
+  var WIDE_CHAR_RE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
+  function charDisplayWidth(ch, fontSizeActual){
+    return fontSizeActual * (WIDE_CHAR_RE.test(ch) ? 1.0 : 0.55);
+  }
+  // opts.noTruncate: trueの場合、ノードの高さに収まる行数を超えても省略(…)せず、全ての行を返す
+  function wrapLabelLines(text, node, opts){
+    opts = opts || {};
     text = String(text || '');
-    var fontScale = (node.fontSize || 12) / 12;
-    var charWidth = 7.2 * fontScale; // 12pxフォントでのおおよその1文字あたりの幅(px)を現在の文字サイズに合わせて拡縮
+    var fontSizeActual = node.fontSize || 12;
+    var fontScale = fontSizeActual / 12;
     var lineHeightForWrap = 15 * fontScale;
-    var maxCharsPerLine = Math.max(3, Math.floor((node.width - 14) / charWidth));
-    var maxLines = Math.max(1, Math.floor((node.height - 16) / lineHeightForWrap));
+    var maxWidth = Math.max(10, node.width - 14);
+    var maxLines = opts.noTruncate ? Infinity : Math.max(1, Math.floor((node.height - 16) / lineHeightForWrap));
     var allLines = [];
     text.split('\n').forEach(function(para){
       if (para === ''){ allLines.push(''); return; }
-      var i = 0;
-      while (i < para.length){
-        allLines.push(para.slice(i, i + maxCharsPerLine));
-        i += maxCharsPerLine;
+      var line = '', lineWidth = 0;
+      for (var i = 0; i < para.length; i++){
+        var ch = para[i];
+        var w = charDisplayWidth(ch, fontSizeActual);
+        if (lineWidth + w > maxWidth && line !== ''){
+          allLines.push(line);
+          line = ch; lineWidth = w;
+        } else {
+          line += ch; lineWidth += w;
+        }
       }
+      allLines.push(line);
     });
     if (!allLines.length) allLines.push('');
     if (allLines.length <= maxLines) return allLines;
@@ -838,13 +870,64 @@
     else expandedMemoIds[nodeId] = true;
     renderQuiet();
   }
+  var allMemosVisible = false; // メモ一括表示ボタンの状態(個別のダブルクリック操作とは独立に管理する)
+  function toggleAllMemos(){
+    allMemosVisible = !allMemosVisible;
+    if (allMemosVisible){
+      state.nodes.forEach(function(n){
+        if (n.nodeType === 'paper' && n.memo && n.memo.trim()) expandedMemoIds[n.id] = true;
+      });
+    } else {
+      expandedMemoIds = {};
+    }
+    document.getElementById('btn-toggle-all-memos').classList.toggle('active', allMemosVisible);
+    renderQuiet();
+  }
   function getMemoBoxSize(nodeId){
     return expandedMemoSizes[nodeId] || { w: 220, h: 150 };
+  }
+
+  function renderAxisNodeContents(g, node, isSelected){
+    var hit = svgEl('rect', { x: node.x, y: node.y, width: node.width, height: node.height, fill: 'transparent', 'pointer-events': 'all', class: 'axis-hitbox' + (isSelected ? ' selected' : '') });
+    g.appendChild(hit);
+
+    var ox = node.x, oy = node.y;
+    var hLine = svgEl('line', { x1: ox, y1: oy, x2: ox + node.width, y2: oy, class: 'axis-arrow', 'marker-end': 'url(#arrow-manual)' });
+    g.appendChild(hLine);
+    var vLine = svgEl('line', { x1: ox, y1: oy, x2: ox, y2: oy + node.height, class: 'axis-arrow', 'marker-end': 'url(#arrow-manual)' });
+    g.appendChild(vLine);
+
+    var yearLabel = svgEl('text', { x: ox + node.width + 6, y: oy, class: 'axis-label', 'dominant-baseline': 'middle' });
+    yearLabel.textContent = 'Year';
+    g.appendChild(yearLabel);
+    var citeLabel = svgEl('text', { x: ox, y: oy + node.height + 14, class: 'axis-label', 'text-anchor': 'middle' });
+    citeLabel.textContent = 'Citation';
+    g.appendChild(citeLabel);
+
+    if (isSelected){
+      var handleSize = 10;
+      var handle = svgEl('rect', {
+        x: node.x+node.width-handleSize/2, y: node.y+node.height-handleSize/2,
+        width: handleSize, height: handleSize, rx: 2, class: 'resize-handle'
+      });
+      handle.addEventListener('mousedown', function(evt){ onResizeHandleMouseDown(evt, node); });
+      handle.addEventListener('touchstart', function(evt){ onResizeHandleMouseDown(evt, node); }, {passive:false});
+      g.appendChild(handle);
+    }
   }
 
   function renderNode(node){
     var g = svgEl('g', { class: 'node-group', 'data-id': node.id });
     var isSelected = (selected.type==='node' && selected.id===node.id);
+
+    if (node.nodeType === 'axis'){
+      renderAxisNodeContents(g, node, isSelected);
+      g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
+      g.addEventListener('touchstart', function(evt){ onNodeMouseDown(evt, node); }, {passive:false});
+      nodeLayer.appendChild(g);
+      return;
+    }
+
     var shape = nodeShapeEl(node);
     shape.setAttribute('class', 'node-shape type-' + node.nodeType + (isSelected ? ' selected' : ''));
     shape.setAttribute('fill', node.color || '#ffffff');
@@ -863,7 +946,8 @@
     }
 
     var cx = node.x + node.width/2, cy = node.y + node.height/2;
-    var lines = wrapLabelLines(nodeLabelText(node), node);
+    var noTruncate = (node.nodeType === 'question' || node.nodeType === 'conclusion' || node.nodeType === 'memo');
+    var lines = wrapLabelLines(nodeLabelText(node), node, { noTruncate: noTruncate });
     var fontSize = node.fontSize || 12;
     var lineHeight = 15 * (fontSize / 12);
     var label = svgEl('text', { x: cx, y: cy, class: 'node-label', 'font-size': fontSize });
@@ -1077,6 +1161,7 @@
   function updateAddButtonAvailability(){
     document.getElementById('btn-add-question').disabled = hasNodeOfType('question');
     document.getElementById('btn-add-conclusion').disabled = hasNodeOfType('conclusion');
+    document.getElementById('btn-add-axis').disabled = hasNodeOfType('axis');
   }
 
   /* ---- プロパティパネル ---- */
@@ -1120,7 +1205,7 @@
     });
   }
   function lockRowHtml(node){
-    return '<label class="lock-row"><input type="checkbox" id="f-locked"'+(node.locked?' checked':'')+'> 📌 位置を固定する(ドラッグ・年代整列の対象外にする)</label>';
+    return '<label class="lock-row"><input type="checkbox" id="f-locked"'+(node.locked?' checked':'')+'> 🔒 位置を固定する(ドラッグ・年代整列の対象外にする)</label>';
   }
   function wireLockCheckbox(node){
     document.getElementById('f-locked').addEventListener('change', function(){
@@ -1153,6 +1238,10 @@
   }
 
   function renderNodePanel(node){
+    if (node.nodeType === 'axis'){
+      proppanel.innerHTML = '<h3>原点・軸アノテーション</h3><div class="empty" style="margin-top:0;">原点と軸の向き(Year/Citation)を示す表示専用の注釈です。ドラッグでの移動・右下ハンドルでの拡大縮小ができます。選択してDelete/Backspaceキーで削除できます。</div>';
+      return;
+    }
     var html = '<h3>' + ({paper:'エビデンスノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'メモノート'}[node.nodeType]) + '</h3>';
     if (node.nodeType === 'paper'){
       html += '<div class="p-top">' +
@@ -1303,7 +1392,7 @@
     for (var i=0;i<buttons.length;i++){
       buttons[i].classList.toggle('active', buttons[i].getAttribute('data-tool')===t);
     }
-    svg.classList.remove('mode-add-paper','mode-add-question','mode-add-conclusion','mode-add-memo','mode-add-edge','mode-pan','mode-pick-year-origin');
+    svg.classList.remove('mode-add-paper','mode-add-question','mode-add-conclusion','mode-add-memo','mode-add-axis','mode-add-edge','mode-pan','mode-pick-year-origin');
     if (t.indexOf('add-')===0 || t === 'pick-year-origin') svg.classList.add('mode-'+t);
     updateHint();
   }
@@ -1315,6 +1404,7 @@
       'add-conclusion': 'キャンバスをクリックすると自分の結論ノードを追加します(地図に1つまで)。',
       'add-memo': 'キャンバスをクリックするとメモノートを追加します。',
       'add-edge': '始点ノード→終点ノードの順にクリックするとリンクを作成します。',
+      'add-axis': 'キャンバスをクリックすると原点・軸の注釈を追加します(地図に1つまで)。',
       'pick-year-origin': '整列の基準にしたい位置(既存のノードでも空白でも可)をクリックしてください。そこを左上として、右下方向に年代(横)×被引用数(縦)で並びます。'
     };
     hintEl.textContent = msgs[tool] || '';
@@ -1458,11 +1548,19 @@
       '.edge-path{fill:none;stroke-width:2;}' +
       '.edge-path.manual{stroke-width:3;}' +
       '.edge-label-bg{fill:#fff;stroke:#ccc;stroke-width:1;}' +
-      '.edge-label{font-size:11px;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}';
+      '.edge-label{font-size:11px;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}' +
+      '.memo-expand-content{box-sizing:border-box;width:100%;height:100%;background:#fff;border:1px solid #DDE5EA;border-radius:8px;box-shadow:0 2px 10px rgba(28,43,51,0.18);font-size:12.5px;padding:8px;overflow-y:auto;}' +
+      '.memo-expand-content .memo-expand-body{margin-top:2px;white-space:pre-wrap;word-break:break-word;font-family:sans-serif;}' +
+      '.axis-arrow{stroke:#333;stroke-width:2;fill:none;}' +
+      '.axis-label{font-size:12px;fill:#333;font-family:sans-serif;}';
     exportSvg.appendChild(styleEl);
 
     var bg = svgEl('rect', { x:b.minX-padding, y:b.minY-padding, width:w, height:h, fill:'#ffffff' });
     exportSvg.appendChild(bg);
+    if (gridVisible){
+      var gridRect = svgEl('rect', { x:b.minX-padding, y:b.minY-padding, width:w, height:h, fill:'url(#gridPattern)' });
+      exportSvg.appendChild(gridRect);
+    }
 
     var edgeClone = edgeLayer.cloneNode(true);
     var nodeClone = nodeLayer.cloneNode(true);
@@ -1470,7 +1568,8 @@
     nodeClone.querySelectorAll('.selected').forEach(function(el){ el.classList.remove('selected'); });
     nodeClone.querySelectorAll('.resize-handle').forEach(function(el){ el.remove(); });
     nodeClone.querySelectorAll('.edge-hit').forEach(function(el){ el.remove(); });
-    nodeClone.querySelectorAll('.memo-expand-box').forEach(function(el){ el.remove(); });
+    nodeClone.querySelectorAll('.memo-expand-box .close-btn').forEach(function(el){ el.remove(); });
+    nodeClone.querySelectorAll('.memo-expand-resize-handle').forEach(function(el){ el.remove(); });
     edgeClone.querySelectorAll('.edge-hit').forEach(function(el){ el.remove(); });
     exportSvg.appendChild(edgeClone);
     exportSvg.appendChild(nodeClone);
@@ -1526,7 +1625,7 @@
       }
       return;
     }
-    var wasAlreadySelectedAndPanelOpen = (node.nodeType === 'paper' && selected.type === 'node' && selected.id === node.id && !panelWrapEl.classList.contains('collapsed'));
+    var wasAlreadySelectedAndPanelOpen = (selected.type === 'node' && selected.id === node.id && !panelWrapEl.classList.contains('collapsed'));
     selectItem('node', node.id);
     var startWorld = screenToWorld(evt);
     var pt = eventPoint(evt);
@@ -1552,7 +1651,7 @@
     }
     if (tool.indexOf('add-') === 0 && tool !== 'add-edge'){
       var nodeType = tool.replace('add-','');
-      if ((nodeType==='question' && hasNodeOfType('question')) || (nodeType==='conclusion' && hasNodeOfType('conclusion'))) return;
+      if ((nodeType==='question' && hasNodeOfType('question')) || (nodeType==='conclusion' && hasNodeOfType('conclusion')) || (nodeType==='axis' && hasNodeOfType('axis'))) return;
       var w = screenToWorld(evt);
       var node = createNode(nodeType, w.x, w.y);
       state.nodes.push(node);
@@ -1564,6 +1663,8 @@
     }
     if (tool === 'select'){
       selectItem(null, null);
+      panelWrapEl.classList.add('collapsed');
+      document.getElementById('panel-toggle').textContent = '◀';
       isPanning = true;
       panStart = { x: eventPoint(evt).clientX - view.x, y: eventPoint(evt).clientY - view.y };
     }
@@ -1640,6 +1741,7 @@
       if (!moved){
         var n = getNode(nid);
         if (n && n.nodeType === 'paper') handlePaperNodeClick(nid, wasAlreadySelectedAndPanelOpen);
+        else if (n) togglePanelForNode(wasAlreadySelectedAndPanelOpen);
         else render();
       } else if (!wasLocked){
         // ドラッグで動かした場合は、保留中の同じノードへのクリック判定(シングル/ダブル)をキャンセルする
@@ -1753,6 +1855,8 @@
   });
   document.getElementById('btn-autolink-toggle').classList.toggle('active', autoLinkVisible);
 
+  document.getElementById('btn-toggle-all-memos').addEventListener('click', toggleAllMemos);
+
   /* ---- プロパティパネルの開閉 ---- */
   var panelWrapEl = document.getElementById('proppanel-wrap');
   document.getElementById('panel-toggle').addEventListener('click', function(){
@@ -1837,11 +1941,12 @@
   var PF_HANDOFF_KEY = 'chm_to_pathfinder';
 
   /* 既にこの地図にあるエビデンスノードと同じ内容か(DOI・PMID・OpenAlex IDのいずれか一致で判定) */
-  function findExistingPaperNode(cp){
+  function findExistingPaperNode(cp, excludeNode){
     var doi = (cp.doi || '').trim().toLowerCase();
     var pmid = (cp.pmid || '').trim();
     var oaId = (cp.id || '').trim();
     return state.nodes.find(function(n){
+      if (n === excludeNode) return false;
       if (n.nodeType !== 'paper') return false;
       if (doi && (n.doi || '').trim().toLowerCase() === doi) return true;
       if (pmid && (n.pmid || '').trim() === pmid) return true;
