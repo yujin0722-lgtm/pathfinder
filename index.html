@@ -34,6 +34,7 @@
   #toolbar button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
   #toolbar button:disabled { opacity: 0.3; cursor: not-allowed; background: transparent; }
   #toolbar hr { width: 100%; border: none; border-top: 1px solid var(--line); margin: 3px 0; }
+  .toolbar-info { display: block; text-align: center; padding: 6px 2px; border: 1px solid transparent; border-radius: 8px; font-size: 11px; line-height: 1.3; color: var(--sub); cursor: default; }
 
   #canvas-wrap { flex: 1; position: relative; background: var(--canvas); overflow: hidden; }
   svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; }
@@ -61,6 +62,10 @@
   .axis-hitbox.selected { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4,3; }
   .axis-arrow { stroke: #333; stroke-width: 2; fill: none; pointer-events: none; }
   .axis-label { font-size: 12px; fill: #333; pointer-events: none; }
+
+  /* 画像ノード */
+  .image-frame { fill: none; stroke: #ccc; stroke-width: 1; cursor: move; }
+  .image-frame.selected { stroke: var(--accent); stroke-width: 2.6; }
 
   .edge-path { fill: none; stroke-width: 2; cursor: pointer; }
   .edge-path.manual { stroke-width: 3; }
@@ -190,6 +195,7 @@
       <button data-tool="add-memo" title="メモノートを追加">メモ</button>
       <button data-tool="add-edge" title="2つのノードを線でつなぐ">線を引く</button>
       <button data-tool="add-axis" id="btn-add-axis" title="原点と軸の向き(Year/Citation)を示す注釈を追加(地図に1つまで)">原点</button>
+      <span id="image-count-display" class="toolbar-info" title="画像をコピーした状態でCtrl+Vを押すと、画像ノードとして地図に追加されます(1つの地図につき5枚まで)">画像 0/5</span>
       <hr>
       <button id="btn-zoomin" title="拡大">拡大</button>
       <button id="btn-zoomout" title="縮小">縮小</button>
@@ -724,7 +730,8 @@
     question:   { width: 170, height: 84, color: '#cfe9fb' },
     conclusion: { width: 170, height: 84, color: '#d7f0d8' },
     memo:       { width: 140, height: 74, color: '#fff4c2' },
-    axis:       { width: 120, height: 90, color: '#ffffff' }
+    axis:       { width: 120, height: 90, color: '#ffffff' },
+    image:      { width: 200, height: 150, color: '#ffffff' }
   };
 
   function createNode(nodeType, x, y){
@@ -744,6 +751,8 @@
       node.text = '自分の結論をここに書く';
     } else if (nodeType === 'memo'){
       node.text = 'メモ';
+    } else if (nodeType === 'image'){
+      node.src = ''; node.aspectRatio = 1;
     }
     return node;
   }
@@ -916,12 +925,39 @@
     }
   }
 
+  function renderImageNodeContents(g, node, isSelected){
+    var img = svgEl('image', { x: node.x, y: node.y, width: node.width, height: node.height, preserveAspectRatio: 'xMidYMid slice' });
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', node.src);
+    img.setAttribute('href', node.src);
+    g.appendChild(img);
+    var frame = svgEl('rect', { x: node.x, y: node.y, width: node.width, height: node.height, class: 'image-frame' + (isSelected ? ' selected' : '') });
+    g.appendChild(frame);
+
+    if (isSelected){
+      var handleSize = 10;
+      var handle = svgEl('rect', {
+        x: node.x+node.width-handleSize/2, y: node.y+node.height-handleSize/2,
+        width: handleSize, height: handleSize, rx: 2, class: 'resize-handle'
+      });
+      handle.addEventListener('mousedown', function(evt){ onResizeHandleMouseDown(evt, node); });
+      handle.addEventListener('touchstart', function(evt){ onResizeHandleMouseDown(evt, node); }, {passive:false});
+      g.appendChild(handle);
+    }
+  }
+
   function renderNode(node){
     var g = svgEl('g', { class: 'node-group', 'data-id': node.id });
     var isSelected = (selected.type==='node' && selected.id===node.id);
 
     if (node.nodeType === 'axis'){
       renderAxisNodeContents(g, node, isSelected);
+      g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
+      g.addEventListener('touchstart', function(evt){ onNodeMouseDown(evt, node); }, {passive:false});
+      nodeLayer.appendChild(g);
+      return;
+    }
+    if (node.nodeType === 'image'){
+      renderImageNodeContents(g, node, isSelected);
       g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
       g.addEventListener('touchstart', function(evt){ onNodeMouseDown(evt, node); }, {passive:false});
       nodeLayer.appendChild(g);
@@ -1156,12 +1192,21 @@
     document.getElementById('stat-edges').textContent = 'リンク: ' + state.edges.length;
     renderPropPanel();
     updateAddButtonAvailability();
+    updateImageCountDisplay();
   }
 
   function updateAddButtonAvailability(){
     document.getElementById('btn-add-question').disabled = hasNodeOfType('question');
     document.getElementById('btn-add-conclusion').disabled = hasNodeOfType('conclusion');
     document.getElementById('btn-add-axis').disabled = hasNodeOfType('axis');
+  }
+
+  var IMAGE_MAX_COUNT = 5;
+  function imageNodeCount(){
+    return state.nodes.filter(function(n){ return n.nodeType === 'image'; }).length;
+  }
+  function updateImageCountDisplay(){
+    document.getElementById('image-count-display').textContent = '画像 ' + imageNodeCount() + '/' + IMAGE_MAX_COUNT;
   }
 
   /* ---- プロパティパネル ---- */
@@ -1240,6 +1285,13 @@
   function renderNodePanel(node){
     if (node.nodeType === 'axis'){
       proppanel.innerHTML = '<h3>原点・軸アノテーション</h3><div class="empty" style="margin-top:0;">原点と軸の向き(Year/Citation)を示す表示専用の注釈です。ドラッグでの移動・右下ハンドルでの拡大縮小ができます。選択してDelete/Backspaceキーで削除できます。</div>';
+      return;
+    }
+    if (node.nodeType === 'image'){
+      proppanel.innerHTML = '<h3>画像ノード</h3><div class="empty" style="margin-top:0;">ドラッグでの移動・右下ハンドルでの拡大縮小(縦横比は固定)ができます。</div><button id="delbtn">この画像を削除</button>';
+      document.getElementById('delbtn').addEventListener('click', function(){
+        deleteNode(node.id); pushHistory(); render();
+      });
       return;
     }
     var html = '<h3>' + ({paper:'エビデンスノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'メモノート'}[node.nodeType]) + '</h3>';
@@ -1552,7 +1604,8 @@
       '.memo-expand-content{box-sizing:border-box;width:100%;height:100%;background:#fff;border:1px solid #DDE5EA;border-radius:8px;box-shadow:0 2px 10px rgba(28,43,51,0.18);font-size:12.5px;padding:8px;overflow-y:auto;}' +
       '.memo-expand-content .memo-expand-body{margin-top:2px;white-space:pre-wrap;word-break:break-word;font-family:sans-serif;}' +
       '.axis-arrow{stroke:#333;stroke-width:2;fill:none;}' +
-      '.axis-label{font-size:12px;fill:#333;font-family:sans-serif;}';
+      '.axis-label{font-size:12px;fill:#333;font-family:sans-serif;}' +
+      '.image-frame{fill:none;stroke:#ccc;stroke-width:1;}';
     exportSvg.appendChild(styleEl);
 
     var bg = svgEl('rect', { x:b.minX-padding, y:b.minY-padding, width:w, height:h, fill:'#ffffff' });
@@ -1685,8 +1738,14 @@
       var w2 = screenToWorld(evt);
       var rnode = getNode(resizing.id);
       if (rnode){
-        rnode.width = Math.max(MIN_NODE_WIDTH, w2.x - rnode.x);
-        rnode.height = Math.max(MIN_NODE_HEIGHT, w2.y - rnode.y);
+        if (rnode.nodeType === 'image' && rnode.aspectRatio){
+          // 画像は縦横比を保ったまま拡大縮小する(横方向のドラッグ量を基準にする)
+          rnode.width = Math.max(MIN_NODE_WIDTH, w2.x - rnode.x);
+          rnode.height = Math.max(MIN_NODE_HEIGHT, rnode.width / rnode.aspectRatio);
+        } else {
+          rnode.width = Math.max(MIN_NODE_WIDTH, w2.x - rnode.x);
+          rnode.height = Math.max(MIN_NODE_HEIGHT, w2.y - rnode.y);
+        }
         renderQuiet();
       }
     } else if (resizingMemoBox){
@@ -2061,6 +2120,63 @@
     }
     processNext(0);
   }
+
+  /* ---- 画像貼り付け(Ctrl+Vでクリップボードの画像を地図に追加) ---- */
+  var IMAGE_MAX_DIM = 800; // 保存前に縮小する最大の縦横px(容量を抑えるため)
+  var IMAGE_DISPLAY_SIZE = 220; // 追加直後の表示サイズ(縦横比は保つ)
+
+  function addImageNode(dataUrl, naturalW, naturalH){
+    var ratio = naturalW / naturalH || 1;
+    var dw, dh;
+    if (ratio >= 1){ dw = IMAGE_DISPLAY_SIZE; dh = IMAGE_DISPLAY_SIZE / ratio; }
+    else { dh = IMAGE_DISPLAY_SIZE; dw = IMAGE_DISPLAY_SIZE * ratio; }
+    var rect = svg.getBoundingClientRect();
+    var center = screenToWorld({ clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2 });
+    var node = createNode('image', center.x, center.y);
+    node.width = dw; node.height = dh;
+    node.x = center.x - dw/2; node.y = center.y - dh/2;
+    node.src = dataUrl;
+    node.aspectRatio = ratio;
+    state.nodes.push(node);
+    pushHistory();
+    render();
+  }
+
+  document.addEventListener('paste', function(evt){
+    var tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    var items = (evt.clipboardData && evt.clipboardData.items) || [];
+    var imageItem = null;
+    for (var i=0; i<items.length; i++){
+      if (items[i].type && items[i].type.indexOf('image/') === 0){ imageItem = items[i]; break; }
+    }
+    if (!imageItem) return;
+    evt.preventDefault();
+    if (imageNodeCount() >= IMAGE_MAX_COUNT){
+      alert('画像ノードは1つの地図につき' + IMAGE_MAX_COUNT + '枚までです。既存の画像を削除してから貼り付けてください。');
+      return;
+    }
+    var file = imageItem.getAsFile();
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      var img = new Image();
+      img.onload = function(){
+        var scale = Math.min(1, IMAGE_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+        var cw = Math.max(1, Math.round(img.naturalWidth * scale));
+        var ch = Math.max(1, Math.round(img.naturalHeight * scale));
+        var canvasEl = document.createElement('canvas');
+        canvasEl.width = cw; canvasEl.height = ch;
+        var ctx = canvasEl.getContext('2d');
+        ctx.drawImage(img, 0, 0, cw, ch);
+        var compressedDataUrl = canvasEl.toDataURL('image/jpeg', 0.82);
+        addImageNode(compressedDataUrl, img.naturalWidth, img.naturalHeight);
+      };
+      img.onerror = function(){ alert('画像の読み込みに失敗しました。'); };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 
   function checkIncomingHandoff(){
     if (!HAS_STORAGE) return;
