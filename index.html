@@ -897,7 +897,14 @@
   }
 
   function renderAxisNodeContents(g, node, isSelected){
-    var hit = svgEl('rect', { x: node.x, y: node.y, width: node.width, height: node.height, fill: 'transparent', 'pointer-events': 'all', class: 'axis-hitbox' + (isSelected ? ' selected' : '') });
+    // クリック判定用の領域は、矢印本体だけでなく右の「Year」・下の「Citation」ラベルの分もはみ出して覆う
+    // (ラベルのtext要素はpointer-events:noneのため、ラベルの上をクリックしても背景クリック扱いにならないようにする。
+    // 「Year」はdominant-baseline:middleでノード上端(node.y)を中心に上下に文字がはみ出すため、上方向にも余白が必要)
+    var hitPadLeft = 40, hitPadRight = 50, hitPadTop = 10, hitPadBottom = 25;
+    var hit = svgEl('rect', {
+      x: node.x - hitPadLeft, y: node.y - hitPadTop, width: node.width + hitPadLeft + hitPadRight, height: node.height + hitPadTop + hitPadBottom,
+      fill: 'transparent', 'pointer-events': 'all', class: 'axis-hitbox' + (isSelected ? ' selected' : '')
+    });
     g.appendChild(hit);
 
     var ox = node.x, oy = node.y;
