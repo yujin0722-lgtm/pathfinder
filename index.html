@@ -1576,6 +1576,43 @@
   }
 
   /* ---- PNG書き出し ---- */
+  /* 展開中のメモ枠をPNG書き出し用に、foreignObject(HTML)を使わない純粋なSVGとして描き直す。
+     (foreignObjectを含むSVGはcanvas.toBlob()実行時に"Tainted canvases may not be exported"エラーとなり
+     書き出し自体が失敗するため、画面表示用のrenderMemoExpandBox()とは別に用意している) */
+  function buildMemoExportGroup(node){
+    var size = getMemoBoxSize(node.id);
+    var boxW = size.w, boxH = size.h;
+    var bx = node.x + node.width - 20, by = node.y - 10;
+    var text = (node.memo && node.memo.trim()) ? node.memo : (node.title || '(メモがありません)');
+
+    var g = svgEl('g', {});
+    g.appendChild(svgEl('rect', { x: bx, y: by, width: boxW, height: boxH, rx: 8, ry: 8, class: 'memo-export-box' }));
+
+    var padding = 8, fontSize = 12.5, lineHeight = 16;
+    var maxWidth = Math.max(10, boxW - padding*2);
+    var lines = [];
+    text.split('\n').forEach(function(para){
+      if (para === ''){ lines.push(''); return; }
+      var line = '', lineWidth = 0;
+      for (var i=0; i<para.length; i++){
+        var ch = para[i];
+        var cw = charDisplayWidth(ch, fontSize);
+        if (lineWidth + cw > maxWidth && line !== ''){ lines.push(line); line = ch; lineWidth = cw; }
+        else { line += ch; lineWidth += cw; }
+      }
+      lines.push(line);
+    });
+
+    var textEl = svgEl('text', { x: bx+padding, y: by+padding+fontSize, class: 'memo-export-text' });
+    lines.forEach(function(line, i){
+      var tspan = svgEl('tspan', { x: bx+padding, dy: (i===0 ? 0 : lineHeight) });
+      tspan.textContent = line;
+      textEl.appendChild(tspan);
+    });
+    g.appendChild(textEl);
+    return g;
+  }
+
   function exportPng(){
     var b = computeContentBounds();
     if (!b){ alert('地図が空です。ノードを追加してから書き出してください。'); return; }
@@ -1608,8 +1645,8 @@
       '.edge-path.manual{stroke-width:3;}' +
       '.edge-label-bg{fill:#fff;stroke:#ccc;stroke-width:1;}' +
       '.edge-label{font-size:11px;text-anchor:middle;dominant-baseline:middle;font-family:sans-serif;}' +
-      '.memo-expand-content{box-sizing:border-box;width:100%;height:100%;background:#fff;border:1px solid #DDE5EA;border-radius:8px;box-shadow:0 2px 10px rgba(28,43,51,0.18);font-size:12.5px;padding:8px;overflow-y:auto;}' +
-      '.memo-expand-content .memo-expand-body{margin-top:2px;white-space:pre-wrap;word-break:break-word;font-family:sans-serif;}' +
+      '.memo-export-box{fill:#fff;stroke:#DDE5EA;stroke-width:1;}' +
+      '.memo-export-text{font-size:12.5px;fill:#1C2B33;font-family:sans-serif;}' +
       '.axis-arrow{stroke:#333;stroke-width:2;fill:none;}' +
       '.axis-label{font-size:12px;fill:#333;font-family:sans-serif;}' +
       '.image-frame{fill:none;stroke:#ccc;stroke-width:1;}';
@@ -1628,11 +1665,17 @@
     nodeClone.querySelectorAll('.selected').forEach(function(el){ el.classList.remove('selected'); });
     nodeClone.querySelectorAll('.resize-handle').forEach(function(el){ el.remove(); });
     nodeClone.querySelectorAll('.edge-hit').forEach(function(el){ el.remove(); });
-    nodeClone.querySelectorAll('.memo-expand-box .close-btn').forEach(function(el){ el.remove(); });
-    nodeClone.querySelectorAll('.memo-expand-resize-handle').forEach(function(el){ el.remove(); });
+    // 展開中のメモ枠(foreignObject/HTML)はそのまま含めるとcanvasへの描画時にtainted canvasとなりPNG書き出し自体が
+    // 失敗するため、書き出し時は含めず、代わりに下で純粋なSVGのtext要素として描き直したものを追加する
+    nodeClone.querySelectorAll('.memo-expand-box').forEach(function(el){ el.remove(); });
     edgeClone.querySelectorAll('.edge-hit').forEach(function(el){ el.remove(); });
     exportSvg.appendChild(edgeClone);
     exportSvg.appendChild(nodeClone);
+
+    Object.keys(expandedMemoIds).forEach(function(nodeId){
+      var n = getNode(nodeId);
+      if (n && n.nodeType === 'paper') exportSvg.appendChild(buildMemoExportGroup(n));
+    });
 
     var serializer = new XMLSerializer();
     var svgString = serializer.serializeToString(exportSvg);

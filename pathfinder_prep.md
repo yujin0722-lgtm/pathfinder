@@ -503,3 +503,7 @@ Yujinさんからの指摘：現時点でのPNG保存は、画面に表示され
 8. **セクション29**：新しいノード種別`image`を追加。操作方法はCtrl+Vでの貼り付け(`document.addEventListener('paste', ...)`)。クリップボードの画像をFileReaderで読み込み、Canvas経由で最大800pxに縮小・JPEG圧縮(quality 0.82)してからBase64のdata URLとしてノードに保存する。1つの地図につき5枚まで(超過時はアラートで通知)。ツールバーに残数を常時表示する要素(`#image-count-display`、「画像 ◯/5」)を追加。アスペクト比を保持して表示し、右下ハンドルでのリサイズも縦横比を保ったまま行われる(横方向のドラッグ量を基準に計算)。プロパティパネルは説明文と削除ボタンのみ
 
 Playwrightで、各項目を個別に動作確認(PMID表示・ツールバー文言・パネル自動クローズ・ロックアイコン・疑問/結論/メモのワンクリック切替・重複チェックの確認ダイアログ・文字はみ出し解消・PNG書き出しへのグリッド/メモ反映・メモ一括表示非表示・原点軸アノテーションの設置/移動/リサイズ/削除/PNG反映・画像の貼り付け/上限/リサイズ/削除)した上で、既存の回帰テスト一式(round2〜round9c、ui-improvements、resize-layout-png、maps、dedup、delete×3、review-boundary、doi-test、doi-pmid-batch、Citrail連携の被引用数受け渡し)もすべて実行し、問題がないことを確認済み。
+
+**PR #21マージ後に発覚した不具合と修正**：
+- 原点・軸アノテーションのクリック判定用の透明な当たり判定(hitbox)が、右の「Year」・下の「Citation」ラベルの表示範囲(pointer-events:noneのため素通りする)をカバーしきれておらず、ラベル付近をクリックすると背景クリック扱いになり詳細パネルが開かない不具合があった。hitboxに上下左右の余白を持たせて修正済み
+- 「PNGで保存」ボタンを押しても無反応になる不具合があった(Yujinさんからの報告)。原因は、メモ展開中(foreignObject/HTML使用)の状態でPNG書き出しを行うと、`canvas.toBlob()`が"Tainted canvases may not be exported"エラーで失敗し、書き出し処理全体が(エラー表示もされないまま)止まっていたため。書き出し用のメモ展開枠は、foreignObjectを使わず純粋なSVGの`text`要素として描き直す(`buildMemoExportGroup()`)ことで回避した。画像ノード(`data:`URIの`<image>`)はcanvasを汚染しないため対象外で問題なし
