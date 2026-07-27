@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>パスファインダー（閲覧専用）</title>
+<title>Eviknot（閲覧専用）</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="assets/icon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/icon-180.png">
 <style>
   :root {
     --canvas: #F3F6F8; --panel: #FFFFFF; --ink: #1C2B33; --sub: #5B6B77;
@@ -83,7 +86,7 @@
 <div id="app">
 
   <div id="topbar">
-    <div id="header-question">パスファインダー（閲覧専用）</div>
+    <div id="header-question">Eviknot（閲覧専用）</div>
     <div id="view-badge">🔒 閲覧専用（編集内容は保存されません）</div>
   </div>
 
@@ -684,7 +687,7 @@
         }
         state = data.state;
         var title = state.title || data.title || '無題の地図';
-        document.title = 'パスファインダー（閲覧専用）：' + title;
+        document.title = 'Eviknot（閲覧専用）：' + title;
         document.getElementById('header-question').textContent = title;
         // 閲覧専用ページでは、メモがあるエビデンスノードは最初から全て展開表示しておく
         // (個別のダブルクリックでの開閉は引き続き可能)
