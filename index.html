@@ -146,13 +146,16 @@
 
   #statusbar { flex: none; height: 30px; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--sub); background: var(--panel); }
 
-  #mapsModal, #batchAddModal { display: none; position: fixed; inset: 0; background: rgba(28,43,51,0.45); align-items: center; justify-content: center; z-index: 50; }
-  #mapsModal .box, #batchAddModal .box { background: var(--panel); border-radius: 10px; padding: 20px; width: 440px; max-height: 70vh; overflow-y: auto; }
-  #mapsModal h3, #batchAddModal h3 { margin: 0 0 12px; font-size: 15px; }
-  #batchAddModal .hint { font-size: 12px; color: var(--sub); margin: 0 0 8px; }
+  #mapsModal, #batchAddModal, #publishModal { display: none; position: fixed; inset: 0; background: rgba(28,43,51,0.45); align-items: center; justify-content: center; z-index: 50; }
+  #mapsModal .box, #batchAddModal .box, #publishModal .box { background: var(--panel); border-radius: 10px; padding: 20px; width: 440px; max-height: 70vh; overflow-y: auto; }
+  #mapsModal h3, #batchAddModal h3, #publishModal h3 { margin: 0 0 12px; font-size: 15px; }
+  #batchAddModal .hint, #publishModal .hint { font-size: 12px; color: var(--sub); margin: 0 0 8px; }
   #batch-add-input { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; }
   #batch-add-status { font-size: 12px; color: var(--sub); margin-top: 8px; white-space: pre-wrap; }
-  #batchAddModal .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+  #batchAddModal .btn-row, #publishModal .btn-row { display: flex; gap: 8px; margin-top: 14px; }
+  #publish-status { font-size: 13px; margin-bottom: 8px; }
+  #publish-link-row { display: flex; gap: 6px; margin-bottom: 8px; }
+  #publish-link-input { flex: 1; font-size: 12px; }
   .map-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); gap: 10px; }
   .map-row .meta { font-size: 12px; color: var(--sub); }
   .map-row .name { font-size: 13px; }
@@ -183,6 +186,7 @@
     <button id="btn-apikey" title="OpenAlexのAPIキーを設定します(Citrailと共有されます)">APIキー設定</button>
     <div class="spacer"></div>
     <button id="btn-sync-login" title="Googleアカウントでログインすると、複数の端末で地図を同期できます">ログイン</button>
+    <button id="btn-publish" title="この地図を、編集権のない閲覧専用リンクとして公開します">🌐 公開</button>
     <span id="sync-status" style="display:none;"></span>
     <button id="btn-fullscreen" title="ヘッダーとツールバーを隠して地図を広げます">⛶ 全画面表示</button>
     <span id="savenote">保存済み</span>
@@ -288,6 +292,23 @@
       <div class="btn-row">
         <button id="btn-batch-add-run">取得して追加</button>
         <button id="btn-batch-add-close">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="publishModal">
+    <div class="box">
+      <h3>この地図を公開</h3>
+      <p class="hint">公開すると、押した時点の内容が編集権のない閲覧専用リンクとして誰でも見られるようになります(スナップショット。その後の編集は、再度「公開する」を押すまでリンク先に反映されません)。</p>
+      <div id="publish-status">未公開です</div>
+      <div id="publish-link-row" style="display:none;">
+        <input type="text" id="publish-link-input" readonly>
+        <button id="btn-copy-publish-link">コピー</button>
+      </div>
+      <div class="btn-row">
+        <button id="btn-publish-now">公開する(現在の内容で更新)</button>
+        <button id="btn-unpublish" style="display:none;">公開を取り消す</button>
+        <button id="btn-close-publish">閉じる</button>
       </div>
     </div>
   </div>
@@ -644,6 +665,81 @@
   window.pfOnSyncReady = function(){
     window.PFSync.watchAuth(handleAuthChange);
   };
+
+  /* ---- exvision：地図を編集権のない閲覧専用リンクとして公開する ----
+     公開はスナップショット方式(公開ボタンを押した時点の内容だけがリンク先に反映される)。
+     Firestoreの`public_maps/{地図ID}`に書き込む。ログイン(sync)していないと公開できない
+     (書き込み権限がFirestoreのルールでログインユーザーに限定されているため)。 */
+  function publishViewUrl(mapId){
+    return location.href.replace(/index\.html.*$/, '') + 'view.html?id=' + encodeURIComponent(mapId);
+  }
+
+  function openPublishModal(){
+    document.getElementById('publishModal').style.display = 'flex';
+    refreshPublishStatus();
+  }
+  function closePublishModal(){
+    document.getElementById('publishModal').style.display = 'none';
+  }
+
+  function refreshPublishStatus(){
+    var statusEl = document.getElementById('publish-status');
+    var linkRow = document.getElementById('publish-link-row');
+    var unpubBtn = document.getElementById('btn-unpublish');
+    if (!syncUser){
+      statusEl.textContent = '公開機能を使うには、まずログイン(同期)してください。';
+      linkRow.style.display = 'none';
+      unpubBtn.style.display = 'none';
+      return;
+    }
+    statusEl.textContent = '確認中…';
+    window.PFSync.getPublicMap(currentMapId).then(function(data){
+      if (data){
+        var d = data.publishedAt ? new Date(data.publishedAt) : null;
+        statusEl.textContent = '公開中です' + (d ? '(最終更新: ' + d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+' '+d.getHours()+':'+String(d.getMinutes()).padStart(2,'0') + ')' : '');
+        document.getElementById('publish-link-input').value = publishViewUrl(currentMapId);
+        linkRow.style.display = '';
+        unpubBtn.style.display = '';
+      } else {
+        statusEl.textContent = '未公開です';
+        linkRow.style.display = 'none';
+        unpubBtn.style.display = 'none';
+      }
+    }).catch(function(){
+      statusEl.textContent = '状態の確認に失敗しました。';
+    });
+  }
+
+  function publishCurrentMap(){
+    if (!syncUser){ alert('公開機能を使うには、まずログイン(同期)してください。'); return; }
+    var statusEl = document.getElementById('publish-status');
+    statusEl.textContent = '公開処理中…';
+    window.PFSync.publishMap(currentMapId, { state: state, title: state.title, ownerUid: syncUser.uid, publishedAt: new Date().toISOString() }).then(function(){
+      refreshPublishStatus();
+    }).catch(function(e){
+      statusEl.textContent = '公開に失敗しました(' + e.message + ')';
+    });
+  }
+
+  function unpublishCurrentMap(){
+    if (!syncUser) return;
+    if (!confirm('この地図の公開を取り消しますか？公開リンクは無効になります。')) return;
+    window.PFSync.unpublishMap(currentMapId).then(function(){
+      refreshPublishStatus();
+    }).catch(function(e){
+      alert('公開の取り消しに失敗しました(' + e.message + ')');
+    });
+  }
+
+  document.getElementById('btn-publish').addEventListener('click', openPublishModal);
+  document.getElementById('btn-close-publish').addEventListener('click', closePublishModal);
+  document.getElementById('btn-publish-now').addEventListener('click', publishCurrentMap);
+  document.getElementById('btn-unpublish').addEventListener('click', unpublishCurrentMap);
+  document.getElementById('btn-copy-publish-link').addEventListener('click', function(){
+    var input = document.getElementById('publish-link-input');
+    input.select();
+    try { navigator.clipboard.writeText(input.value); } catch(e){}
+  });
 
   /* ---- 地図一覧モーダル ---- */
   function openMapsModal(){
@@ -2397,7 +2493,7 @@
   // 後に実行されるため、準備ができたら window.pfOnSyncReady() を呼んで知らせる)。
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-  import { getFirestore, doc, setDoc, deleteDoc, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+  import { getFirestore, doc, setDoc, deleteDoc, getDoc, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
   var firebaseConfig = {
     apiKey: "AIzaSyC6wvZ9afToa4DOH73YaQ6yA4qx4twr2A8",
@@ -2426,7 +2522,12 @@
         return out;
       });
     },
-    subscribeMaps: function(uid, cb){ return onSnapshot(collection(db, 'users', uid, 'maps'), cb); }
+    subscribeMaps: function(uid, cb){ return onSnapshot(collection(db, 'users', uid, 'maps'), cb); },
+    publishMap: function(mapId, payload){ return setDoc(doc(db, 'public_maps', mapId), payload); },
+    unpublishMap: function(mapId){ return deleteDoc(doc(db, 'public_maps', mapId)); },
+    getPublicMap: function(mapId){
+      return getDoc(doc(db, 'public_maps', mapId)).then(function(snap){ return snap.exists() ? snap.data() : null; });
+    }
   };
 
   if (window.pfOnSyncReady) window.pfOnSyncReady();

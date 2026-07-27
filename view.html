@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>パスファインダー（閲覧専用）</title>
+<style>
+  :root {
+    --canvas: #F3F6F8; --panel: #FFFFFF; --ink: #1C2B33; --sub: #5B6B77;
+    --line: #DDE5EA; --accent: #1B5FA6; --accent-soft: #E4EDF7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: "Hiragino Kaku Gothic ProN","Meiryo",sans-serif; color: var(--ink); }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  #topbar { flex: none; min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  #header-question { font-size: 14.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  #view-badge { font-size: 12px; color: var(--sub); background: var(--accent-soft); border-radius: 6px; padding: 4px 10px; white-space: nowrap; }
+
+  #canvas-wrap { flex: 1; position: relative; background: var(--canvas); overflow: hidden; }
+  svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+
+  .node-shape { stroke: #666; stroke-width: 1.3; cursor: move; }
+  .node-shape.type-question { stroke-width: 2; }
+  .node-shape.type-conclusion { stroke-width: 4; }
+  .node-label { text-anchor: middle; dominant-baseline: middle; pointer-events: none; fill: var(--ink); }
+
+  .axis-hitbox { fill: transparent; cursor: move; }
+  .axis-arrow { stroke: #333; stroke-width: 2; fill: none; pointer-events: none; }
+  .axis-label { font-size: 12px; fill: #333; pointer-events: none; }
+
+  .image-frame { fill: none; stroke: #ccc; stroke-width: 1; cursor: move; }
+
+  .edge-path { fill: none; stroke-width: 2; }
+  .edge-path.manual { stroke-width: 3; }
+  .edge-label-bg { fill: #fff; stroke: #ccc; stroke-width: 1; }
+  .edge-label { font-size: 11px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+
+  .node-year-badge-bg { fill: #fff; stroke: var(--line); stroke-width: 1; }
+  .node-year-badge { font-size: 12px; font-weight: 600; fill: var(--sub); text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .node-lock-badge { font-size: 11px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .node-type-badge { font-size: 14px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+  .node-outside-label { font-size: 11.5px; fill: var(--ink); text-anchor: middle; pointer-events: none; }
+
+  .memo-expand-content { box-sizing: border-box; width: 100%; height: 100%; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 2px 10px rgba(28,43,51,0.18); font-size: 12.5px; padding: 8px; overflow-y: auto; }
+  .memo-expand-content .close-btn { float: right; border: 1px solid var(--line); background: var(--canvas); border-radius: 50%; width: 20px; height: 20px; padding: 0; font-size: 13px; line-height: 1; cursor: pointer; margin-left: 6px; color: var(--sub); }
+  .memo-expand-content .close-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .memo-expand-content .memo-expand-body { margin-top: 24px; white-space: pre-wrap; word-break: break-word; }
+  .memo-expand-resize-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; cursor: nwse-resize; }
+
+  #hint { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,0.9); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 12px; color: var(--sub); max-width: 360px; pointer-events: none; }
+
+  #legend { position: absolute; left: 12px; top: 12px; max-width: 230px; background: rgba(255,255,255,.96); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px 10px; font-size: 11.5px; line-height: 1.5; box-shadow: 0 2px 8px rgba(28,43,51,.08); max-height: calc(100% - 60px); overflow-y: auto; }
+  #legend.collapsed #legend-body { display: none; }
+  #legend-toggle { border: none; background: none; padding: 4px 2px; font-size: 11.5px; color: var(--sub); cursor: pointer; font-weight: 600; width: 100%; text-align: left; }
+  #legend-toggle:hover { color: var(--accent); }
+  #legend h3 { font-size: 11px; color: var(--sub); font-weight: 600; margin: 6px 0 3px; }
+  #legend h3:first-child { margin-top: 0; }
+  .lg-row { display: flex; align-items: center; gap: 7px; }
+  .shape { width: 13px; height: 13px; flex: none; color: var(--sub); }
+  .arrow-note { margin-top: 7px; padding-top: 6px; border-top: 1px dashed var(--line); color: var(--sub); }
+
+  #load-error { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: 14px; color: var(--sub); text-align: center; padding: 20px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="topbar">
+    <div id="header-question">パスファインダー（閲覧専用）</div>
+    <div id="view-badge">🔒 閲覧専用（編集内容は保存されません）</div>
+  </div>
+
+  <div id="canvas-wrap">
+    <svg id="canvas">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path>
+        </marker>
+        <marker id="arrow-manual" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path>
+        </marker>
+      </defs>
+      <g id="viewport">
+        <g id="edgeLayer"></g>
+        <g id="nodeLayer"></g>
+      </g>
+    </svg>
+    <div id="hint">ドラッグでノードを移動・背景ドラッグで画面移動・ホイールで拡大縮小できます（見やすくするためのもので保存はされません）。エビデンスノードをダブルクリックするとメモが開きます。</div>
+    <div id="legend">
+      <button id="legend-toggle" aria-expanded="true">凡例 <span id="legend-caret">▾</span></button>
+      <div id="legend-body">
+        <h3>形：研究の種類</h3>
+        <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>RCT</div>
+        <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="7,1 12.5,4 12.5,10 7,13 1.5,10 1.5,4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>メタ解析・SR</div>
+        <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><rect x="1.5" y="3" width="11" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>レビュー</div>
+        <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="7,1.5 13,12.5 1,12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>観察研究</div>
+        <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="7,0.8 8.8,5.1 13.2,5.3 9.8,8.1 11,12.6 7,10.1 3,12.6 4.2,8.1 0.8,5.3 5.2,5.1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>ガイドライン</div>
+        <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><polygon points="1,3.5 9.5,3.5 13,7 9.5,10.5 1,10.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>症例報告</div>
+        <div class="lg-row"><svg class="shape" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>その他・未定</div>
+        <h3>ノードの種類</h3>
+        <div class="lg-row">❓ 臨床疑問(青の二重枠)</div>
+        <div class="lg-row">✅ 自分の結論(緑の二重枠)</div>
+        <div class="lg-row">📝 メモノート(黄色・角折れ)</div>
+        <h3>線</h3>
+        <div class="lg-row">点線(グレー) ＝ 自動リンク(引用関係)</div>
+        <div class="lg-row">実線(色つき) ＝ 手動リンク</div>
+        <div class="arrow-note">ノード左上の数字＝出版年、左下の数字＝被引用数<br>🔒＝位置が固定されたノード</div>
+      </div>
+    </div>
+    <div id="load-error"></div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var EDGE_COLOR_PRESETS = ["#b8b8b8","#a9c9ef","#a8d8b9","#f6cf8e","#f4a9a8","#c9b3e0"];
+
+  var svg = document.getElementById('canvas');
+  var viewport = document.getElementById('viewport');
+  var nodeLayer = document.getElementById('nodeLayer');
+  var edgeLayer = document.getElementById('edgeLayer');
+  var hintEl = document.getElementById('hint');
+
+  var state = { title: '', nodes: [], edges: [], nextId: 1 };
+  var view = { x: 0, y: 0, scale: 1 };
+
+  function svgEl(tag, attrs){
+    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+  function truncate(s, n){ s = String(s); return s.length > n ? s.slice(0,n-1) + '…' : s; }
+  function getNode(id){ return state.nodes.find(function(n){ return n.id === id; }); }
+
+  /* ---- 形状(index.htmlと同じロジック) ---- */
+  function pointsToStr(pts){ return pts.map(function(p){ return p[0]+','+p[1]; }).join(' '); }
+  function shapeBox(x,y,w,h){
+    var ratio = 1.25;
+    var bw = Math.min(w, h * ratio);
+    return { x: x + (w - bw) / 2, y: y, w: bw, h: h };
+  }
+  function rectPoints(x,y,w,h){ return [[x,y],[x+w,y],[x+w,y+h],[x,y+h]]; }
+  function diamondPoints(x,y,w,h){ var b=shapeBox(x,y,w,h); return [[b.x+b.w/2,b.y],[b.x+b.w,b.y+b.h/2],[b.x+b.w/2,b.y+b.h],[b.x,b.y+b.h/2]]; }
+  function hexagonPoints(x,y,w,h){ var b=shapeBox(x,y,w,h); var q=b.w*0.25; return [[b.x+q,b.y],[b.x+b.w-q,b.y],[b.x+b.w,b.y+b.h/2],[b.x+b.w-q,b.y+b.h],[b.x+q,b.y+b.h],[b.x,b.y+b.h/2]]; }
+  function trianglePoints(x,y,w,h){ var b=shapeBox(x,y,w,h); return [[b.x+b.w/2,b.y],[b.x+b.w,b.y+b.h],[b.x,b.y+b.h]]; }
+  function tagPoints(x,y,w,h){ var b=shapeBox(x,y,w,h); var n=b.w*0.2; return [[b.x,b.y+b.h*0.12],[b.x+b.w-n,b.y],[b.x+b.w,b.y+b.h/2],[b.x+b.w-n,b.y+b.h],[b.x,b.y+b.h*0.88]]; }
+  function foldedRectPoints(x,y,w,h){ var f=Math.min(w,h)*0.22; return [[x,y],[x+w-f,y],[x+w,y+f],[x+w,y+h],[x,y+h]]; }
+  function starPoints(x,y,w,h){
+    var cx=x+w/2, cy=y+h/2, rOuter=Math.min(w,h)/2, rInner=rOuter*0.42;
+    var pts=[];
+    for (var i=0;i<10;i++){
+      var r = (i%2===0) ? rOuter : rInner;
+      var ang = -Math.PI/2 + i*Math.PI/5;
+      pts.push([cx+r*Math.cos(ang), cy+r*Math.sin(ang)]);
+    }
+    return pts;
+  }
+  function paperShapeEl(node){
+    var x=node.x, y=node.y, w=node.width, h=node.height;
+    var st = node.studyType || 'OTHER';
+    if (st === 'OTHER') return svgEl('ellipse', { cx:x+w/2, cy:y+h/2, rx:w/2, ry:h/2 });
+    if (st === 'REVIEW') return svgEl('rect', { x:x, y:y, width:w, height:h, rx:14, ry:14 });
+    var ptsFn = { RCT: diamondPoints, META: hexagonPoints, OBS: trianglePoints, GUIDE: starPoints, CASE: tagPoints }[st] || diamondPoints;
+    return svgEl('polygon', { points: pointsToStr(ptsFn(x,y,w,h)) });
+  }
+  function nodeShapeEl(node){
+    var x=node.x, y=node.y, w=node.width, h=node.height;
+    if (node.nodeType === 'paper') return paperShapeEl(node);
+    if (node.nodeType === 'memo') return svgEl('polygon', { points: pointsToStr(foldedRectPoints(x,y,w,h)) });
+    return svgEl('rect', { x:x, y:y, width:w, height:h, rx:8, ry:8 });
+  }
+
+  /* ---- 文字表示(index.htmlと同じロジック) ---- */
+  function nodeInsideExcerpt(node){
+    if (node.pmid) return node.pmid;
+    var src = (node.memo && node.memo.trim()) ? node.memo.trim() : (node.title || '');
+    src = src.replace(/\n/g, ' ');
+    return truncate(src, 10) || '(空)';
+  }
+  function nodeLabelText(node){
+    if (node.nodeType === 'paper') return nodeInsideExcerpt(node);
+    return node.text || '(空)';
+  }
+  var WIDE_CHAR_RE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
+  function charDisplayWidth(ch, fontSizeActual){
+    return fontSizeActual * (WIDE_CHAR_RE.test(ch) ? 1.0 : 0.55);
+  }
+  function wrapLabelLines(text, node, opts){
+    opts = opts || {};
+    text = String(text || '');
+    var fontSizeActual = node.fontSize || 12;
+    var fontScale = fontSizeActual / 12;
+    var lineHeightForWrap = 15 * fontScale;
+    var maxWidth = Math.max(10, node.width - 14);
+    var maxLines = opts.noTruncate ? Infinity : Math.max(1, Math.floor((node.height - 16) / lineHeightForWrap));
+    var allLines = [];
+    text.split('\n').forEach(function(para){
+      if (para === ''){ allLines.push(''); return; }
+      var line = '', lineWidth = 0;
+      for (var i = 0; i < para.length; i++){
+        var ch = para[i];
+        var w = charDisplayWidth(ch, fontSizeActual);
+        if (lineWidth + w > maxWidth && line !== ''){ allLines.push(line); line = ch; lineWidth = w; }
+        else { line += ch; lineWidth += w; }
+      }
+      allLines.push(line);
+    });
+    if (!allLines.length) allLines.push('');
+    if (allLines.length <= maxLines) return allLines;
+    var shown = allLines.slice(0, maxLines);
+    var last = shown[maxLines-1];
+    shown[maxLines-1] = (last.length > 1 ? last.slice(0, -1) : last) + '…';
+    return shown;
+  }
+
+  /* ---- メモ展開(ダブルクリックで開閉。表示専用ページなので状態保存は不要) ---- */
+  var expandedMemoIds = {};
+  var expandedMemoSizes = {};
+  var MEMO_BOX_MIN_W = 140, MEMO_BOX_MIN_H = 80;
+  function toggleMemoExpand(nodeId){
+    if (expandedMemoIds[nodeId]) delete expandedMemoIds[nodeId];
+    else expandedMemoIds[nodeId] = true;
+    render();
+  }
+  function getMemoBoxSize(nodeId){
+    return expandedMemoSizes[nodeId] || { w: 220, h: 150 };
+  }
+  function renderMemoExpandBox(node){
+    var size = getMemoBoxSize(node.id);
+    var boxW = size.w, boxH = size.h;
+    var x = node.x + node.width - 20;
+    var y = node.y - 10;
+
+    var wrap = svgEl('g', { class: 'memo-expand-box', 'data-id': node.id });
+    wrap.addEventListener('mousedown', function(evt){ evt.stopPropagation(); });
+    wrap.addEventListener('touchstart', function(evt){ evt.stopPropagation(); }, {passive:false});
+
+    var fo = svgEl('foreignObject', { x: x, y: y, width: boxW, height: boxH });
+    var div = document.createElement('div');
+    div.className = 'memo-expand-content';
+    var btn = document.createElement('button');
+    btn.className = 'close-btn';
+    btn.type = 'button';
+    btn.textContent = '×';
+    btn.title = '折りたたむ';
+    btn.addEventListener('click', function(evt){ evt.stopPropagation(); toggleMemoExpand(node.id); });
+    var body = document.createElement('div');
+    body.className = 'memo-expand-body';
+    body.textContent = (node.memo && node.memo.trim()) ? node.memo : (node.title || '(メモがありません)');
+    div.appendChild(btn);
+    div.appendChild(body);
+    fo.appendChild(div);
+    wrap.appendChild(fo);
+
+    var handleSize = 11;
+    var resizeHandle = svgEl('rect', {
+      x: x+boxW-handleSize, y: y+boxH-handleSize, width: handleSize, height: handleSize, rx: 2,
+      class: 'memo-expand-resize-handle'
+    });
+    resizeHandle.addEventListener('mousedown', function(evt){ onMemoExpandResizeMouseDown(evt, node, boxW, boxH); });
+    resizeHandle.addEventListener('touchstart', function(evt){ onMemoExpandResizeMouseDown(evt, node, boxW, boxH); }, {passive:false});
+    wrap.appendChild(resizeHandle);
+
+    return wrap;
+  }
+
+  /* ---- ノード描画(選択状態・リサイズハンドルはこのページでは存在しない) ---- */
+  function renderAxisNodeContents(g, node){
+    var ox = node.x, oy = node.y;
+    var hLine = svgEl('line', { x1: ox, y1: oy, x2: ox + node.width, y2: oy, class: 'axis-arrow', 'marker-end': 'url(#arrow-manual)' });
+    g.appendChild(hLine);
+    var vLine = svgEl('line', { x1: ox, y1: oy, x2: ox, y2: oy + node.height, class: 'axis-arrow', 'marker-end': 'url(#arrow-manual)' });
+    g.appendChild(vLine);
+    var yearLabel = svgEl('text', { x: ox + node.width + 6, y: oy, class: 'axis-label', 'dominant-baseline': 'middle' });
+    yearLabel.textContent = 'Year';
+    g.appendChild(yearLabel);
+    var citeLabel = svgEl('text', { x: ox, y: oy + node.height + 14, class: 'axis-label', 'text-anchor': 'middle' });
+    citeLabel.textContent = 'Citation';
+    g.appendChild(citeLabel);
+    var hitPadLeft = 40, hitPadRight = 50, hitPadTop = 10, hitPadBottom = 25;
+    var hit = svgEl('rect', {
+      x: node.x - hitPadLeft, y: node.y - hitPadTop, width: node.width + hitPadLeft + hitPadRight, height: node.height + hitPadTop + hitPadBottom,
+      fill: 'transparent', 'pointer-events': 'all', class: 'axis-hitbox'
+    });
+    g.appendChild(hit);
+  }
+  function renderImageNodeContents(g, node){
+    var img = svgEl('image', { x: node.x, y: node.y, width: node.width, height: node.height, preserveAspectRatio: 'xMidYMid slice' });
+    img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', node.src);
+    img.setAttribute('href', node.src);
+    g.appendChild(img);
+    g.appendChild(svgEl('rect', { x: node.x, y: node.y, width: node.width, height: node.height, class: 'image-frame' }));
+  }
+  function renderNode(node){
+    var g = svgEl('g', { class: 'node-group', 'data-id': node.id });
+
+    if (node.nodeType === 'axis'){
+      renderAxisNodeContents(g, node);
+      g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
+      nodeLayer.appendChild(g);
+      return;
+    }
+    if (node.nodeType === 'image'){
+      renderImageNodeContents(g, node);
+      g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
+      nodeLayer.appendChild(g);
+      return;
+    }
+
+    var shape = nodeShapeEl(node);
+    shape.setAttribute('class', 'node-shape type-' + node.nodeType);
+    shape.setAttribute('fill', node.color || '#ffffff');
+    g.appendChild(shape);
+
+    if (node.nodeType === 'question'){
+      var inner = svgEl('rect', { x: node.x+5, y: node.y+5, width: node.width-10, height: node.height-10, rx:5, ry:5, fill:'none', stroke:'#666', 'stroke-width':1 });
+      g.appendChild(inner);
+    }
+    if (node.nodeType === 'question' || node.nodeType === 'conclusion'){
+      var typeIcon = svgEl('text', { x: node.x+15, y: node.y+15, class: 'node-type-badge' });
+      typeIcon.textContent = (node.nodeType === 'question') ? '❓' : '✅';
+      g.appendChild(typeIcon);
+    }
+
+    var cx = node.x + node.width/2, cy = node.y + node.height/2;
+    var noTruncate = (node.nodeType === 'question' || node.nodeType === 'conclusion' || node.nodeType === 'memo');
+    var lines = wrapLabelLines(nodeLabelText(node), node, { noTruncate: noTruncate });
+    var fontSize = node.fontSize || 12;
+    var lineHeight = 15 * (fontSize / 12);
+    var label = svgEl('text', { x: cx, y: cy, class: 'node-label', 'font-size': fontSize });
+    var startDy = -(lines.length-1) * lineHeight / 2;
+    lines.forEach(function(line, i){
+      var tspan = svgEl('tspan', { x: cx, dy: (i===0 ? startDy : lineHeight) });
+      tspan.textContent = line;
+      label.appendChild(tspan);
+    });
+    g.appendChild(label);
+
+    if (node.nodeType === 'paper'){
+      if (node.year){
+        var ybw = 36, ybh = 18;
+        var ybx = node.x + 2, yby = node.y + 2;
+        g.appendChild(svgEl('rect', { x: ybx, y: yby, width: ybw, height: ybh, rx: 3, ry: 3, class: 'node-year-badge-bg' }));
+        var ytext = svgEl('text', { x: ybx+ybw/2, y: yby+ybh/2, class: 'node-year-badge' });
+        ytext.textContent = node.year;
+        g.appendChild(ytext);
+      }
+      if (node.cites != null){
+        var cbw = 36, cbh = 18;
+        var cbx = node.x + 2, cby = node.y + node.height - 2 - cbh;
+        g.appendChild(svgEl('rect', { x: cbx, y: cby, width: cbw, height: cbh, rx: 3, ry: 3, class: 'node-year-badge-bg' }));
+        var ctext = svgEl('text', { x: cbx+cbw/2, y: cby+cbh/2, class: 'node-year-badge' });
+        ctext.textContent = node.cites;
+        g.appendChild(ctext);
+      }
+      var outside = svgEl('text', { x: cx, y: node.y + node.height + 14, class: 'node-outside-label' });
+      outside.textContent = truncate(node.title || '(無題のエビデンス)', 30);
+      g.appendChild(outside);
+    }
+
+    if (node.locked){
+      var lockText = svgEl('text', { x: node.x+node.width-14, y: node.y+14, class: 'node-lock-badge' });
+      lockText.textContent = '🔒';
+      g.appendChild(lockText);
+    }
+
+    g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
+    if (node.nodeType === 'paper'){
+      g.addEventListener('dblclick', function(evt){ evt.stopPropagation(); toggleMemoExpand(node.id); });
+    }
+    nodeLayer.appendChild(g);
+
+    if (node.nodeType === 'paper' && expandedMemoIds[node.id]){
+      nodeLayer.appendChild(renderMemoExpandBox(node));
+    }
+  }
+
+  /* ---- リンク描画 ---- */
+  function nodeBoundaryPoint(node, towardX, towardY){
+    var cx = node.x + node.width/2, cy = node.y + node.height/2;
+    var dx = towardX-cx, dy = towardY-cy;
+    if (dx===0 && dy===0) return {x:cx,y:cy};
+    var isRectLike = node.nodeType === 'question' || node.nodeType === 'conclusion' || node.nodeType === 'memo' ||
+      (node.nodeType === 'paper' && node.studyType === 'REVIEW');
+    if (isRectLike){
+      var hw = node.width/2, hh = node.height/2;
+      var tx = dx !== 0 ? hw/Math.abs(dx) : Infinity;
+      var ty = dy !== 0 ? hh/Math.abs(dy) : Infinity;
+      var t = Math.min(tx, ty, 1);
+      return { x: cx+dx*t, y: cy+dy*t };
+    }
+    var rx = node.width/2, ry = node.height/2;
+    var t2 = 1/Math.sqrt(Math.pow(dx/rx,2)+Math.pow(dy/ry,2));
+    t2 = Math.min(t2,1);
+    return { x: cx+dx*t2, y: cy+dy*t2 };
+  }
+  function edgePairKey(edge){
+    var a = edge.sourceNodeId, b = edge.targetNodeId;
+    return a < b ? a+'|'+b : b+'|'+a;
+  }
+  function computeEdgeCurveOffsets(edges){
+    var groups = {};
+    edges.forEach(function(e){ var k = edgePairKey(e); (groups[k] = groups[k] || []).push(e); });
+    var offsets = {};
+    Object.keys(groups).forEach(function(k){
+      var g = groups[k];
+      var n = g.length;
+      g.forEach(function(e, i){ offsets[e.id] = (n === 1) ? 0 : (i - (n-1)/2) * 26; });
+    });
+    return offsets;
+  }
+  function renderEdge(edge, curveOffset){
+    var s = getNode(edge.sourceNodeId), t = getNode(edge.targetNodeId);
+    if (!s || !t) return;
+    var scx=s.x+s.width/2, scy=s.y+s.height/2, tcx=t.x+t.width/2, tcy=t.y+t.height/2;
+    var p1 = nodeBoundaryPoint(s, tcx, tcy);
+    var p2 = nodeBoundaryPoint(t, scx, scy);
+    var mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+    var d;
+    if (curveOffset){
+      var dx=p2.x-p1.x, dy=p2.y-p1.y, len=Math.sqrt(dx*dx+dy*dy)||1;
+      var nx=-dy/len, ny=dx/len;
+      mx = mx + nx*curveOffset; my = my + ny*curveOffset;
+      d = 'M ' + p1.x + ' ' + p1.y + ' Q ' + mx + ' ' + my + ' ' + p2.x + ' ' + p2.y;
+    } else {
+      d = 'M ' + p1.x + ' ' + p1.y + ' L ' + p2.x + ' ' + p2.y;
+    }
+    var g = svgEl('g', { class: 'edge-group', 'data-id': edge.id });
+    var color = edge.auto ? '#9e9e9e' : (edge.color || EDGE_COLOR_PRESETS[0]);
+    var path = svgEl('path', { d:d, stroke: color, class: 'edge-path' + (edge.auto ? '' : ' manual') });
+    if (edge.auto){
+      path.setAttribute('stroke-dasharray', '6,4');
+      path.setAttribute('marker-end', 'url(#arrow)');
+    } else {
+      if (edge.direction === 'one' || edge.direction === 'two') path.setAttribute('marker-end', 'url(#arrow-manual)');
+      if (edge.direction === 'two') path.setAttribute('marker-start', 'url(#arrow-manual)');
+    }
+    g.appendChild(path);
+    if (edge.label){
+      var bg = svgEl('circle', { cx:mx, cy:my, r: Math.max(10, edge.label.length*3), class:'edge-label-bg' });
+      var lbl = svgEl('text', { x:mx, y:my, class:'edge-label', fill: color });
+      lbl.textContent = truncate(edge.label, 10);
+      g.appendChild(bg); g.appendChild(lbl);
+    }
+    edgeLayer.appendChild(g);
+  }
+
+  function render(){
+    nodeLayer.innerHTML = '';
+    edgeLayer.innerHTML = '';
+    var offsets = computeEdgeCurveOffsets(state.edges);
+    state.edges.forEach(function(e){ renderEdge(e, offsets[e.id]); });
+    state.nodes.forEach(renderNode);
+  }
+
+  /* ---- パン・ズーム・ノードのドラッグ移動(見やすさのためだけ。保存はしない) ---- */
+  function eventPoint(evt){
+    if (evt.touches && evt.touches.length) return evt.touches[0];
+    if (evt.changedTouches && evt.changedTouches.length) return evt.changedTouches[0];
+    return evt;
+  }
+  function screenToWorld(evt){
+    var pt = eventPoint(evt);
+    var rect = svg.getBoundingClientRect();
+    var sx = pt.clientX - rect.left, sy = pt.clientY - rect.top;
+    return { x: (sx - view.x)/view.scale, y: (sy - view.y)/view.scale };
+  }
+  function applyViewTransform(){
+    viewport.setAttribute('transform', 'translate('+view.x+','+view.y+') scale('+view.scale+')');
+  }
+  function computeContentBounds(){
+    var minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    state.nodes.forEach(function(n){
+      minX=Math.min(minX,n.x); minY=Math.min(minY,n.y);
+      maxX=Math.max(maxX,n.x+n.width); maxY=Math.max(maxY,n.y+n.height);
+    });
+    if (minX===Infinity) return null;
+    return {minX:minX,minY:minY,maxX:maxX,maxY:maxY};
+  }
+  function fitToView(){
+    var b = computeContentBounds();
+    var rect = svg.getBoundingClientRect();
+    var w = rect.width||800, h = rect.height||600;
+    if (!b){ view.scale=1; view.x=w/2; view.y=h/2; applyViewTransform(); return; }
+    var padding=60;
+    var cw=Math.max(b.maxX-b.minX,1), ch=Math.max(b.maxY-b.minY,1);
+    var scale = Math.min(Math.max(w-padding*2,50)/cw, Math.max(h-padding*2,50)/ch, 3);
+    scale = Math.max(scale,0.1);
+    view.scale = scale;
+    view.x = w/2 - (b.minX+b.maxX)/2*scale;
+    view.y = h/2 - (b.minY+b.maxY)/2*scale;
+    applyViewTransform();
+  }
+
+  var dragging = null, isPanning = false, panStart = null;
+  function onNodeMouseDown(evt, node){
+    evt.preventDefault(); evt.stopPropagation();
+    var startWorld = screenToWorld(evt);
+    dragging = { id: node.id, offX: startWorld.x - node.x, offY: startWorld.y - node.y };
+  }
+  svg.addEventListener('mousedown', function(evt){
+    if (evt.target !== svg && evt.target !== viewport && evt.target.id !== 'canvas') return;
+    isPanning = true;
+    panStart = { x: eventPoint(evt).clientX - view.x, y: eventPoint(evt).clientY - view.y };
+  });
+  window.addEventListener('mousemove', function(evt){
+    if (dragging){
+      var w = screenToWorld(evt);
+      var node = getNode(dragging.id);
+      if (node){ node.x = w.x - dragging.offX; node.y = w.y - dragging.offY; render(); }
+    } else if (isPanning && panStart){
+      view.x = eventPoint(evt).clientX - panStart.x;
+      view.y = eventPoint(evt).clientY - panStart.y;
+      applyViewTransform();
+    }
+  });
+  window.addEventListener('mouseup', function(){
+    dragging = null; isPanning = false; panStart = null;
+  });
+  svg.addEventListener('wheel', function(evt){
+    evt.preventDefault();
+    var factor = evt.deltaY < 0 ? 1.1 : 0.9;
+    var rect = svg.getBoundingClientRect();
+    var mx = evt.clientX-rect.left, my = evt.clientY-rect.top;
+    var wx = (mx-view.x)/view.scale, wy = (my-view.y)/view.scale;
+    view.scale = Math.min(Math.max(view.scale*factor, 0.1), 4);
+    view.x = mx - wx*view.scale;
+    view.y = my - wy*view.scale;
+    applyViewTransform();
+  }, { passive:false });
+
+  function onMemoExpandResizeMouseDown(evt, node, boxW, boxH){
+    evt.preventDefault(); evt.stopPropagation();
+    var startWorld = screenToWorld(evt);
+    var move = function(mvEvt){
+      var w = screenToWorld(mvEvt);
+      expandedMemoSizes[node.id] = {
+        w: Math.max(MEMO_BOX_MIN_W, boxW + (w.x - startWorld.x)),
+        h: Math.max(MEMO_BOX_MIN_H, boxH + (w.y - startWorld.y))
+      };
+      render();
+    };
+    var up = function(){
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+
+  /* ---- 凡例の開閉 ---- */
+  document.getElementById('legend-toggle').addEventListener('click', function(){
+    var legend = document.getElementById('legend');
+    var collapsed = legend.classList.toggle('collapsed');
+    document.getElementById('legend-caret').textContent = collapsed ? '▸' : '▾';
+    this.setAttribute('aria-expanded', String(!collapsed));
+  });
+
+  /* ---- Firestoreから公開データを読み込む ---- */
+  function showError(msg){
+    var el = document.getElementById('load-error');
+    el.textContent = msg;
+    el.style.display = 'flex';
+  }
+
+  var params = new URLSearchParams(location.search);
+  var publicId = params.get('id');
+  if (!publicId){
+    showError('公開IDが指定されていません。共有されたリンクからアクセスしてください。');
+  } else {
+    window.pfViewLoad = function(){
+      window.PFView.getPublicMap(publicId).then(function(data){
+        if (!data){
+          showError('この地図は見つからないか、公開が取り消されています。');
+          return;
+        }
+        state = data.state;
+        var title = state.title || data.title || '無題の地図';
+        document.title = 'パスファインダー（閲覧専用）：' + title;
+        document.getElementById('header-question').textContent = title;
+        render();
+        fitToView();
+      }).catch(function(e){
+        showError('読み込みに失敗しました(' + e.message + ')');
+      });
+    };
+  }
+})();
+</script>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+  import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+  var firebaseConfig = {
+    apiKey: "AIzaSyC6wvZ9afToa4DOH73YaQ6yA4qx4twr2A8",
+    authDomain: "evidence-based-labyrinth.firebaseapp.com",
+    projectId: "evidence-based-labyrinth",
+    storageBucket: "evidence-based-labyrinth.firebasestorage.app",
+    messagingSenderId: "126918830732",
+    appId: "1:126918830732:web:31556a1a96de8a7867a9a9"
+  };
+
+  var fbApp = initializeApp(firebaseConfig);
+  var db = getFirestore(fbApp);
+
+  window.PFView = {
+    getPublicMap: function(mapId){
+      return getDoc(doc(db, 'public_maps', mapId)).then(function(snap){ return snap.exists() ? snap.data() : null; });
+    }
+  };
+
+  if (window.pfViewLoad) window.pfViewLoad();
+</script>
+</body>
+</html>
