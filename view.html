@@ -17,8 +17,24 @@
   #header-question { font-size: 14.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
   #view-badge { font-size: 12px; color: var(--sub); background: var(--accent-soft); border-radius: 6px; padding: 4px 10px; white-space: nowrap; }
 
+  #main { flex: 1; display: flex; min-height: 0; }
   #canvas-wrap { flex: 1; position: relative; background: var(--canvas); overflow: hidden; }
   svg#canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  #gridBg { pointer-events: none; }
+
+  #proppanel-wrap { flex: none; width: 300px; border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; transition: width .15s; }
+  #proppanel-wrap.collapsed { width: 0; overflow: hidden; border-left: none; }
+  #proppanel { padding: 14px; }
+  #proppanel h3 { font-size: 13px; margin: 0 0 10px; color: var(--sub); font-weight: 600; }
+  #proppanel .empty { font-size: 13px; color: var(--sub); margin-top: 20px; }
+  #proppanel label { display: block; font-size: 12px; color: var(--sub); margin: 12px 0 4px; }
+  .p-top { margin-bottom: 8px; }
+  .p-tag { font-size: 11px; border-radius: 4px; padding: 2px 6px; background: var(--accent-soft); color: var(--accent); display: inline-block; margin-bottom: 6px; }
+  .p-title { font-size: 14.5px; font-weight: 600; }
+  .node-dl { display: grid; grid-template-columns: 52px 1fr; gap: 6px 10px; font-size: 12.5px; align-items: center; margin: 10px 0; }
+  .node-dl dt { color: var(--sub); margin: 0; }
+  .node-dl dd { margin: 0; }
+  .readonly-memo { font-size: 13px; white-space: pre-wrap; word-break: break-word; padding: 8px 0; }
 
   .node-shape { stroke: #666; stroke-width: 1.3; cursor: move; }
   .node-shape.type-question { stroke-width: 2; }
@@ -71,6 +87,7 @@
     <div id="view-badge">🔒 閲覧専用（編集内容は保存されません）</div>
   </div>
 
+  <div id="main">
   <div id="canvas-wrap">
     <svg id="canvas">
       <defs>
@@ -80,8 +97,12 @@
         <marker id="arrow-manual" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="context-stroke"></path>
         </marker>
+        <pattern id="gridPattern" width="40" height="40" patternUnits="userSpaceOnUse">
+          <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#C3CDD5" stroke-width="1"></path>
+        </pattern>
       </defs>
       <g id="viewport">
+        <rect id="gridBg" x="-6000" y="-6000" width="12000" height="12000" fill="url(#gridPattern)"></rect>
         <g id="edgeLayer"></g>
         <g id="nodeLayer"></g>
       </g>
@@ -109,6 +130,11 @@
       </div>
     </div>
     <div id="load-error"></div>
+  </div>
+
+  <div id="proppanel-wrap" class="collapsed">
+    <div id="proppanel"><div class="empty">ノードを選ぶと、ここに詳細が表示されます(閲覧専用のため編集はできません)。</div></div>
+  </div>
   </div>
 
 </div>
@@ -369,9 +395,6 @@
     }
 
     g.addEventListener('mousedown', function(evt){ onNodeMouseDown(evt, node); });
-    if (node.nodeType === 'paper'){
-      g.addEventListener('dblclick', function(evt){ evt.stopPropagation(); toggleMemoExpand(node.id); });
-    }
     nodeLayer.appendChild(g);
 
     if (node.nodeType === 'paper' && expandedMemoIds[node.id]){
@@ -496,19 +519,87 @@
     applyViewTransform();
   }
 
+  /* ---- 読み取り専用の詳細パネル(index.htmlのプロパティパネルの表示専用版) ---- */
+  var STUDY_LABEL = { RCT: "RCT", META: "メタ解析・SR", REVIEW: "レビュー", OBS: "観察研究", GUIDE: "ガイドライン", CASE: "症例報告", OTHER: "その他・未定" };
+  function escHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  var selected = { type: null, id: null };
+  var panelWrapEl = document.getElementById('proppanel-wrap');
+
+  function buildReadOnlyPanelHtml(node){
+    if (node.nodeType === 'axis'){
+      return '<h3>原点・軸アノテーション</h3><div class="empty" style="margin-top:0;">原点と軸の向き(Year/Citation)を示す注釈です。</div>';
+    }
+    if (node.nodeType === 'image'){
+      return '<h3>画像ノード</h3><div class="empty" style="margin-top:0;">画像が貼り付けられています。</div>';
+    }
+    if (node.nodeType === 'paper'){
+      var html = '<h3>エビデンスノード</h3>';
+      html += '<div class="p-top"><span class="p-tag">' + escHtml(STUDY_LABEL[node.studyType] || 'その他・未定') + '</span><div class="p-title">' + escHtml(node.title || '(無題のエビデンス)') + '</div></div>';
+      html += '<div class="node-dl">';
+      html += '<dt>著者</dt><dd>' + escHtml(node.authors || '(なし)') + '</dd>';
+      html += '<dt>発表年</dt><dd>' + escHtml(node.year || '(なし)') + '</dd>';
+      html += '<dt>雑誌</dt><dd>' + escHtml(node.journal || '(なし)') + '</dd>';
+      html += '<dt>PMID</dt><dd>' + (node.pmid ? '<a href="https://pubmed.ncbi.nlm.nih.gov/'+encodeURIComponent(node.pmid)+'/" target="_blank" rel="noopener noreferrer">'+escHtml(node.pmid)+'</a>' : '取得なし') + '</dd>';
+      html += '<dt>被引用数</dt><dd>' + (node.cites != null ? node.cites.toLocaleString() + ' 回' : '取得なし') + '</dd>';
+      html += '</div>';
+      html += '<label>メモ</label><div class="readonly-memo">' + (node.memo && node.memo.trim() ? escHtml(node.memo).replace(/\n/g,'<br>') : '(メモはありません)') + '</div>';
+      return html;
+    }
+    var heading = { question: '臨床疑問ノード', conclusion: '自分の結論ノード', memo: 'メモノート' }[node.nodeType] || 'ノード';
+    return '<h3>' + heading + '</h3><div class="readonly-memo">' + escHtml(node.text || '(空)').replace(/\n/g,'<br>') + '</div>';
+  }
+  function renderPropPanel(){
+    var node = selected.type === 'node' ? getNode(selected.id) : null;
+    document.getElementById('proppanel').innerHTML = node
+      ? buildReadOnlyPanelHtml(node)
+      : '<div class="empty">ノードを選ぶと、ここに詳細が表示されます(閲覧専用のため編集はできません)。</div>';
+  }
+  function togglePanelForNode(wasOpen){
+    if (wasOpen) panelWrapEl.classList.add('collapsed');
+    else panelWrapEl.classList.remove('collapsed');
+  }
+
+  var DOUBLE_CLICK_MS = 300;
+  var pendingNodeClick = null;
+  function handlePaperNodeClick(nid, wasOpen){
+    if (pendingNodeClick && pendingNodeClick.nodeId === nid){
+      clearTimeout(pendingNodeClick.timer);
+      pendingNodeClick = null;
+      toggleMemoExpand(nid);
+    } else {
+      if (pendingNodeClick) clearTimeout(pendingNodeClick.timer);
+      pendingNodeClick = {
+        nodeId: nid,
+        timer: setTimeout(function(){
+          pendingNodeClick = null;
+          togglePanelForNode(wasOpen);
+        }, DOUBLE_CLICK_MS)
+      };
+    }
+  }
+
   var dragging = null, isPanning = false, panStart = null;
   function onNodeMouseDown(evt, node){
     evt.preventDefault(); evt.stopPropagation();
+    var wasOpen = (selected.type === 'node' && selected.id === node.id && !panelWrapEl.classList.contains('collapsed'));
     var startWorld = screenToWorld(evt);
-    dragging = { id: node.id, offX: startWorld.x - node.x, offY: startWorld.y - node.y };
+    var pt = eventPoint(evt);
+    dragging = { id: node.id, offX: startWorld.x - node.x, offY: startWorld.y - node.y, startClientX: pt.clientX, startClientY: pt.clientY, moved: false, wasOpen: wasOpen };
   }
   svg.addEventListener('mousedown', function(evt){
     if (evt.target !== svg && evt.target !== viewport && evt.target.id !== 'canvas') return;
+    selected = { type: null, id: null };
+    panelWrapEl.classList.add('collapsed');
     isPanning = true;
     panStart = { x: eventPoint(evt).clientX - view.x, y: eventPoint(evt).clientY - view.y };
   });
   window.addEventListener('mousemove', function(evt){
     if (dragging){
+      var pt = eventPoint(evt);
+      if (!dragging.moved){
+        var mdx = pt.clientX - dragging.startClientX, mdy = pt.clientY - dragging.startClientY;
+        if (Math.sqrt(mdx*mdx + mdy*mdy) > 4) dragging.moved = true;
+      }
       var w = screenToWorld(evt);
       var node = getNode(dragging.id);
       if (node){ node.x = w.x - dragging.offX; node.y = w.y - dragging.offY; render(); }
@@ -519,7 +610,20 @@
     }
   });
   window.addEventListener('mouseup', function(){
-    dragging = null; isPanning = false; panStart = null;
+    if (dragging){
+      var nid = dragging.id, moved = dragging.moved, wasOpen = dragging.wasOpen;
+      var n = getNode(nid);
+      dragging = null;
+      if (!moved){
+        selected = { type: 'node', id: nid };
+        renderPropPanel();
+        if (n && n.nodeType === 'paper') handlePaperNodeClick(nid, wasOpen);
+        else togglePanelForNode(wasOpen);
+      } else if (pendingNodeClick && pendingNodeClick.nodeId === nid){
+        clearTimeout(pendingNodeClick.timer); pendingNodeClick = null;
+      }
+    }
+    isPanning = false; panStart = null;
   });
   svg.addEventListener('wheel', function(evt){
     evt.preventDefault();
@@ -582,6 +686,11 @@
         var title = state.title || data.title || '無題の地図';
         document.title = 'パスファインダー（閲覧専用）：' + title;
         document.getElementById('header-question').textContent = title;
+        // 閲覧専用ページでは、メモがあるエビデンスノードは最初から全て展開表示しておく
+        // (個別のダブルクリックでの開閉は引き続き可能)
+        state.nodes.forEach(function(n){
+          if (n.nodeType === 'paper' && n.memo && n.memo.trim()) expandedMemoIds[n.id] = true;
+        });
         render();
         fitToView();
       }).catch(function(e){
