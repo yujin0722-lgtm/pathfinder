@@ -24,6 +24,7 @@
   #topbar button:hover { border-color: var(--accent); color: var(--accent); }
   #topbar button:disabled { opacity: 0.35; cursor: not-allowed; }
   #savenote { font-size: 12px; color: #1a7a3c; background: #eafff0; border: 1px solid #b7ecc6; padding: 4px 10px; border-radius: 6px; }
+  #sync-status { font-size: 12px; color: var(--sub); }
 
   #main { flex: 1; display: flex; min-height: 0; }
 
@@ -181,6 +182,8 @@
     <button id="btn-export-png" title="今の地図をPNG画像として書き出す">🖼 PNG保存</button>
     <button id="btn-apikey" title="OpenAlexのAPIキーを設定します(Citrailと共有されます)">APIキー設定</button>
     <div class="spacer"></div>
+    <button id="btn-sync-login" title="Googleアカウントでログインすると、複数の端末で地図を同期できます">ログイン</button>
+    <span id="sync-status" style="display:none;"></span>
     <button id="btn-fullscreen" title="ヘッダーとツールバーを隠して地図を広げます">⛶ 全画面表示</button>
     <span id="savenote">保存済み</span>
   </div>
@@ -449,6 +452,11 @@
         saveMapsIndex(index);
         var t = new Date();
         note.textContent = '保存済み(' + t.getHours() + ':' + String(t.getMinutes()).padStart(2,'0') + ')';
+        if (syncUser){
+          window.PFSync.pushMap(syncUser.uid, currentMapId, { state: state, title: state.title, updatedAt: now }).catch(function(){
+            note.textContent = '保存済み(クラウド同期は失敗)';
+          });
+        }
       } catch(e){
         note.textContent = '保存に失敗しました';
       }
@@ -490,6 +498,7 @@
     var index = loadMapsIndex().filter(function(m){ return m.id !== id; });
     saveMapsIndex(index);
     try { localStorage.removeItem(mapDataKey(id)); } catch(e){}
+    if (syncUser){ window.PFSync.deleteMap(syncUser.uid, id).catch(function(){}); }
     if (id === currentMapId){
       if (index.length){ openMap(index[0].id); }
       else { createNewMap(); }
@@ -505,6 +514,136 @@
     if (index.length && openMap(index[0].id)) return;
     createNewMap();
   }
+
+  /* ---- クラウド同期(sync)：Googleアカウントでログインすると、Firebase(Firestore)経由で
+     複数の端末に地図を同期する。ログインしなければ今まで通りローカルのみで動作する。
+     Firebase本体は末尾の<script type="module">で読み込み、window.PFSyncとして公開される */
+  var syncUser = null;
+  var syncUnsubscribe = null;
+
+  function updateSyncUI(){
+    var btn = document.getElementById('btn-sync-login');
+    var status = document.getElementById('sync-status');
+    if (syncUser){
+      btn.textContent = 'ログアウト';
+      status.style.display = '';
+      status.textContent = syncUser.email + ' で同期中';
+    } else {
+      btn.textContent = 'ログイン';
+      status.style.display = 'none';
+    }
+  }
+
+  function stopRealtimeSync(){
+    if (syncUnsubscribe){ syncUnsubscribe(); syncUnsubscribe = null; }
+  }
+
+  /* リモートの1件をローカルに反映する(ローカルの方が新しい/同じ場合は何もしない) */
+  function handleRemoteMapUpsert(mapId, data){
+    var index = loadMapsIndex();
+    var entry = index.find(function(m){ return m.id === mapId; });
+    var remoteUpdatedAt = data.updatedAt || '';
+    if (entry && entry.updatedAt >= remoteUpdatedAt) return;
+    localStorage.setItem(mapDataKey(mapId), JSON.stringify(data.state));
+    if (entry){ entry.updatedAt = remoteUpdatedAt; entry.title = data.title; }
+    else { index.push({ id: mapId, title: data.title, updatedAt: remoteUpdatedAt }); }
+    saveMapsIndex(index);
+    if (mapId === currentMapId){
+      state = data.state;
+      refreshTitleDisplay();
+      history = []; future = []; selected = { type:null, id:null };
+      render(); fitToView();
+    }
+    if (document.getElementById('mapsModal').style.display !== 'none') renderMapsList();
+  }
+
+  function handleRemoteMapRemoved(mapId){
+    if (!loadMapsIndex().some(function(m){ return m.id === mapId; })) return;
+    deleteMap(mapId);
+    if (document.getElementById('mapsModal').style.display !== 'none') renderMapsList();
+  }
+
+  function startRealtimeSync(user){
+    stopRealtimeSync();
+    syncUnsubscribe = window.PFSync.subscribeMaps(user.uid, function(snapshot){
+      snapshot.docChanges().forEach(function(change){
+        if (change.type === 'removed'){ handleRemoteMapRemoved(change.doc.id); return; }
+        if (change.doc.metadata.hasPendingWrites) return; // 自分がした書き込みのローカルエコーは無視する
+        handleRemoteMapUpsert(change.doc.id, change.doc.data());
+      });
+    });
+  }
+
+  /* ログイン直後に1回だけ行う、ローカルとクラウドの地図のすり合わせ(新しい方のupdatedAtを採用) */
+  function doInitialMerge(user){
+    return window.PFSync.fetchAllMaps(user.uid).then(function(remoteMaps){
+      var localIndex = loadMapsIndex();
+      var remoteById = {};
+      remoteMaps.forEach(function(r){ remoteById[r.id] = r.data; });
+
+      remoteMaps.forEach(function(r){
+        var localEntry = localIndex.find(function(m){ return m.id === r.id; });
+        var remoteUpdatedAt = r.data.updatedAt || '';
+        if (!localEntry || remoteUpdatedAt > localEntry.updatedAt){
+          localStorage.setItem(mapDataKey(r.id), JSON.stringify(r.data.state));
+          if (localEntry){ localEntry.updatedAt = remoteUpdatedAt; localEntry.title = r.data.title; }
+          else { localIndex.push({ id: r.id, title: r.data.title, updatedAt: remoteUpdatedAt }); }
+        }
+      });
+      saveMapsIndex(localIndex);
+
+      var pushes = [];
+      localIndex.forEach(function(m){
+        var r = remoteById[m.id];
+        if (!r || (m.updatedAt||'') > (r.updatedAt||'')){
+          var data = loadMapData(m.id);
+          if (data) pushes.push(window.PFSync.pushMap(user.uid, m.id, { state: data, title: m.title, updatedAt: m.updatedAt }));
+        }
+      });
+      return Promise.all(pushes);
+    }).then(function(){
+      if (currentMapId){
+        var freshData = loadMapData(currentMapId);
+        if (freshData){
+          state = freshData;
+          refreshTitleDisplay();
+          history = []; future = []; selected = { type:null, id:null };
+          render(); fitToView();
+        }
+      }
+      if (document.getElementById('mapsModal').style.display !== 'none') renderMapsList();
+    });
+  }
+
+  function handleAuthChange(user){
+    syncUser = user;
+    updateSyncUI();
+    if (user){
+      doInitialMerge(user).then(function(){
+        startRealtimeSync(user);
+      }).catch(function(e){
+        alert('クラウド同期でエラーが発生しました。このGoogleアカウントが同期を許可されているか確認してください。\n(' + e.message + ')');
+        window.PFSync.signOut();
+      });
+    } else {
+      stopRealtimeSync();
+    }
+  }
+
+  document.getElementById('btn-sync-login').addEventListener('click', function(){
+    if (syncUser){ window.PFSync.signOut(); }
+    else {
+      window.PFSync.signIn().catch(function(e){
+        if (e && e.code === 'auth/popup-closed-by-user') return;
+        alert('ログインに失敗しました: ' + e.message);
+      });
+    }
+  });
+
+  /* Firebase本体(末尾のmodule script)の読み込みが終わり次第呼ばれる */
+  window.pfOnSyncReady = function(){
+    window.PFSync.watchAuth(handleAuthChange);
+  };
 
   /* ---- 地図一覧モーダル ---- */
   function openMapsModal(){
@@ -2249,6 +2388,48 @@
   loadInitialMap();
   checkIncomingHandoff();
 })();
+</script>
+
+<script type="module">
+  // クラウド同期(sync)機能用のFirebase初期化。読み込みはCDN経由のESモジュールで、
+  // ビルド不要という方針は維持したまま追加している。上のメインスクリプトからは
+  // window.PFSync 経由でのみアクセスする(モジュールスクリプトは通常のスクリプトより
+  // 後に実行されるため、準備ができたら window.pfOnSyncReady() を呼んで知らせる)。
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+  import { getFirestore, doc, setDoc, deleteDoc, collection, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+  var firebaseConfig = {
+    apiKey: "AIzaSyC6wvZ9afToa4DOH73YaQ6yA4qx4twr2A8",
+    authDomain: "evidence-based-labyrinth.firebaseapp.com",
+    projectId: "evidence-based-labyrinth",
+    storageBucket: "evidence-based-labyrinth.firebasestorage.app",
+    messagingSenderId: "126918830732",
+    appId: "1:126918830732:web:31556a1a96de8a7867a9a9"
+  };
+
+  var fbApp = initializeApp(firebaseConfig);
+  var auth = getAuth(fbApp);
+  var db = getFirestore(fbApp);
+  var provider = new GoogleAuthProvider();
+
+  window.PFSync = {
+    signIn: function(){ return signInWithPopup(auth, provider); },
+    signOut: function(){ return signOut(auth); },
+    watchAuth: function(cb){ return onAuthStateChanged(auth, cb); },
+    pushMap: function(uid, mapId, payload){ return setDoc(doc(db, 'users', uid, 'maps', mapId), payload); },
+    deleteMap: function(uid, mapId){ return deleteDoc(doc(db, 'users', uid, 'maps', mapId)); },
+    fetchAllMaps: function(uid){
+      return getDocs(collection(db, 'users', uid, 'maps')).then(function(snap){
+        var out = [];
+        snap.forEach(function(d){ out.push({ id: d.id, data: d.data() }); });
+        return out;
+      });
+    },
+    subscribeMaps: function(uid, cb){ return onSnapshot(collection(db, 'users', uid, 'maps'), cb); }
+  };
+
+  if (window.pfOnSyncReady) window.pfOnSyncReady();
 </script>
 </body>
 </html>
