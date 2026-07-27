@@ -525,3 +525,46 @@ Yujinさんからの報告：「矢印をクリック（ワンクリック、ダ
 - ダブルクリックについては、矢印ノードには疑問/結論/メモと同様のダブルクリック専用処理がなく単純に「シングルクリックの判定(トグル)」が2回呼ばれるだけのため、素早い連続クリックだとパネルが開いてすぐ閉じる(またはその逆)ことで見た目上「何も起きていない」ように見えている可能性がある
 
 **次回セッションでやること**：実装前に、Yujinさんに実際にどのあたりをクリックしているか(矢印の線の上か、L字の内側の空間か、ラベル文字の上かなど)を確認し、可能であれば動作の様子(スクリーンショットや動画)を見せてもらってから、再現・修正を行う。
+
+## 37. クラウド同期機能「sync」の実装（2026-07-26 セッション、実装完了、Pathfinderのみ）
+
+Yujinさんとの相談で、今後2つの追加機能構想が出た。呼び方を以下の通り統一する。
+- **sync**：複数端末での地図データの同期(ブラウザのブックマーク同期のようなイメージ)。少数の個人利用が対象
+- **exvision**：整理したエビデンス地図を、編集権なしの閲覧専用で外部に公開する機能。今回は未着手(構想のみ)
+
+**検討の結果**：
+- どちらもLocal Storageのみで完結する現在の設計から踏み出し、クラウド上にデータを預ける仕組み(Firebase)が必要という結論になった
+- **Citrailにはsyncを実装しない**ことに決定(Yujinさんの判断：Citrailは論文ごとの引用展開が主目的で、腰を据えて作業を続ける場所ではないため、地図の保存・同期という概念自体が合わない)
+- syncは**Pathfinderのみ**に実装する
+
+**採用したバックエンド**：Firebase(Firestore + Authentication)。Yujinさんが実際にFirebaseプロジェクト「Evidence-Based-Labyrinth」(プロジェクトID: `evidence-based-labyrinth`)を作成し、Firestore(Standardエディション)とGoogleサインインを有効化済み。Firestoreのセキュリティルールは以下の内容で設定済み(許可リストは`yujin0722@gmail.com`のみ、今後増やす場合は配列に追記):
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAllowed() {
+      return request.auth != null &&
+        request.auth.token.email in ['yujin0722@gmail.com'];
+    }
+    match /users/{userId}/{document=**} {
+      allow read, write: if isAllowed() && request.auth.uid == userId;
+    }
+  }
+}
+```
+
+**実装内容**：
+1. Firebase JS SDK(v10.14.1)をCDNから`<script type="module">`で読み込み、ビルド不要という方針は維持(`index.html`の末尾に追加)。`firebaseConfig`はクライアントに埋め込まれる前提の情報なので、そのままコードに含めている
+2. モジュールスクリプトは`window.PFSync`という薄いラッパー(`signIn`/`signOut`/`watchAuth`/`pushMap`/`deleteMap`/`fetchAllMaps`/`subscribeMaps`)を公開する。モジュールスクリプトは通常のスクリプトより後に実行されるため、準備ができたら`window.pfOnSyncReady()`を呼び出し、メインのスクリプト側がそれを合図に`watchAuth()`を登録する
+3. トップバーに「ログイン」ボタンと同期状態表示(`#sync-status`)を追加。未ログインなら今まで通りローカルのみで動作する
+4. データ構造：Firestoreの`users/{uid}/maps/{地図ID}`に、`{ state: 地図のJSON全体, title, updatedAt }`という形で保存。Local Storageの`pf_maps_index`/`pf_map_{id}`とほぼ1対1で対応する
+5. **保存のタイミング**：既存の自動保存(`autosave()`、`pushHistory()`/`undo()`/`redo()`から呼ばれる)にそのまま便乗し、ローカル保存が成功した後にログイン中であればFirestoreへも書き込む
+6. **ログイン直後の初回すり合わせ**(`doInitialMerge()`)：クラウドの全地図を1回取得し、地図ごとに`updatedAt`を比較して新しい方を採用する(ローカルが新しければクラウドへpush、クラウドが新しければローカルへpull)。今開いている地図が変わった場合は再描画する
+7. **以降のリアルタイム同期**(`startRealtimeSync()`)：Firestoreの`onSnapshot`で他端末からの変更を購読する。自分自身が今しがた書き込んだ内容のローカルエコー(`doc.metadata.hasPendingWrites === true`)は無視し、他端末からの本当の変更だけを反映する。今開いている地図が変更されたら即座に再描画する
+8. **削除の同期**：`deleteMap()`にログイン中ならFirestore側のドキュメントも削除する処理を追加。他端末で削除された場合も、`onSnapshot`の`removed`イベント経由で同じ`deleteMap()`を呼んでローカルからも削除する
+9. **ログアウト**：リアルタイム購読を解除する。ログアウト後はローカルのみで動作を続ける(ログイン前のデータはそのまま残る)
+10. 許可リストにないGoogleアカウントでログインしようとした場合(Firestoreのアクセス拒否エラーが発生した場合)は、エラーメッセージを表示して自動的にサインアウトする
+
+**テスト方法について**：このセッションのサンドボックス環境ではFirebaseの実際のCDN(`gstatic.com`)への外部通信がブロックされるため、`firebase-app.js`/`firebase-auth.js`/`firebase-firestore.js`の3つを模したフェイクのESモジュールを自作し、Playwrightの`page.route()`で本物のCDN URLの代わりに読み込ませることで、sync周りの自作ロジック(初回すり合わせ・リアルタイム反映・削除伝播・サインアウト後の購読解除)を検証した。実際のFirebaseとの疎通(本物のGoogleサインインのポップアップ操作等)は、Yujinさんの実環境で最終確認が必要。
+
+**次回セッションでやること**：実際のブラウザでログイン→複数端末での同期の様子をYujinさんに確認してもらう。問題なければ、いずれ「exvision」(閲覧専用の公開機能)の設計に進む。
