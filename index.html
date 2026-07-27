@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Eviknot</title>
+<title>Eviknot ― エビデンスをつなぐ</title>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="assets/icon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/icon-180.png">
@@ -19,6 +19,12 @@
 
   #topbar { flex: none; min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); overflow-x: auto; overflow-y: hidden; }
   #topbar > * { flex-shrink: 0; }
+  .eviknot-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; padding: 4px 6px; border-radius: 6px; }
+  .eviknot-brand:hover { background: var(--accent-soft); }
+  .eviknot-brand img { display: block; border-radius: 6px; flex: none; }
+  .eviknot-brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+  .eviknot-name { font-size: 14px; font-weight: 700; color: var(--ink); }
+  .eviknot-sub { font-size: 10.5px; color: var(--sub); }
   #header-question { font-size: 14.5px; font-weight: 600; color: var(--ink); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; padding: 6px 10px; border-radius: 6px; }
   #header-question:hover { background: var(--accent-soft); color: var(--accent); }
   #header-question.placeholder { color: var(--sub); font-weight: 400; font-style: italic; }
@@ -179,6 +185,10 @@
 <div id="app">
 
   <div id="topbar">
+    <a class="eviknot-brand" href="./" title="Eviknot ― エビデンスをつなぐ">
+      <img src="assets/favicon-32.png" width="28" height="28" alt="">
+      <span class="eviknot-brand-text"><span class="eviknot-name">Eviknot</span><span class="eviknot-sub">エビデンスをつなぐ</span></span>
+    </a>
     <div id="header-question" title="クリックすると臨床疑問ノードを編集できます">（臨床疑問未設定）</div>
     <button id="btn-new" title="新しい地図をこの一覧に追加して開く">新しい地図</button>
     <button id="btn-maps" title="保存されている地図の一覧を開く">地図一覧</button>

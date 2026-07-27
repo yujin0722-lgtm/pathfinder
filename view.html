@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Eviknot（閲覧専用）</title>
+<title>Eviknot（閲覧専用）― エビデンスをつなぐ</title>
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="assets/icon-512.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/icon-180.png">
@@ -19,6 +19,12 @@
   #topbar { flex: none; min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
   #header-question { font-size: 14.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
   #view-badge { font-size: 12px; color: var(--sub); background: var(--accent-soft); border-radius: 6px; padding: 4px 10px; white-space: nowrap; }
+  .eviknot-brand { display: flex; align-items: center; gap: 8px; text-decoration: none; padding: 4px 6px; border-radius: 6px; flex: none; }
+  .eviknot-brand:hover { background: var(--accent-soft); }
+  .eviknot-brand img { display: block; border-radius: 6px; flex: none; }
+  .eviknot-brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+  .eviknot-name { font-size: 14px; font-weight: 700; color: var(--ink); }
+  .eviknot-sub { font-size: 10.5px; color: var(--sub); }
 
   #main { flex: 1; display: flex; min-height: 0; }
   #canvas-wrap { flex: 1; position: relative; background: var(--canvas); overflow: hidden; }
@@ -86,6 +92,10 @@
 <div id="app">
 
   <div id="topbar">
+    <a class="eviknot-brand" href="./index.html" title="Eviknot ― エビデンスをつなぐ">
+      <img src="assets/favicon-32.png" width="28" height="28" alt="">
+      <span class="eviknot-brand-text"><span class="eviknot-name">Eviknot</span><span class="eviknot-sub">エビデンスをつなぐ</span></span>
+    </a>
     <div id="header-question">Eviknot（閲覧専用）</div>
     <div id="view-badge">🔒 閲覧専用（編集内容は保存されません）</div>
   </div>
