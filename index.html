@@ -228,7 +228,7 @@
       <button id="btn-batch-add" title="DOIまたはPMIDを複数まとめて入力し、エビデンスノードとして追加します">複数追加</button>
       <button data-tool="add-question" id="btn-add-question" title="臨床疑問ノードを追加(地図に1つまで)">疑問</button>
       <button data-tool="add-conclusion" id="btn-add-conclusion" title="自分の結論ノードを追加(地図に1つまで)">結論</button>
-      <button data-tool="add-memo" title="メモノートを追加">メモ</button>
+      <button data-tool="add-memo" title="付箋を追加">付箋</button>
       <button data-tool="add-edge" title="2つのノードを線でつなぐ">線を引く</button>
       <button data-tool="add-axis" id="btn-add-axis" title="原点と軸の向き(Year/Citation)を示す注釈を追加(地図に1つまで)">原点</button>
       <span id="image-count-display" class="toolbar-info" title="画像をコピーした状態でCtrl+Vを押すと、画像ノードとして地図に追加されます(1つの地図につき5枚まで)">画像 0/5</span>
@@ -281,7 +281,7 @@
           <h3>ノードの種類</h3>
           <div class="lg-row">❓ 臨床疑問(青の二重枠)</div>
           <div class="lg-row">✅ 自分の結論(緑の二重枠)</div>
-          <div class="lg-row">📝 メモノート(黄色・角折れ)</div>
+          <div class="lg-row">📝 付箋(黄色・角折れ)</div>
           <h3>線</h3>
           <div class="lg-row">点線(グレー) ＝ 自動リンク(OpenAlexの引用関係、編集不可)</div>
           <div class="lg-row">実線(色つき) ＝ 手動リンク(色・ラベルを自由に設定可能)</div>
@@ -1057,7 +1057,7 @@
     } else if (nodeType === 'conclusion'){
       node.text = '自分の結論をここに書く';
     } else if (nodeType === 'memo'){
-      node.text = 'メモ';
+      node.text = '付箋';
     } else if (nodeType === 'image'){
       node.src = ''; node.aspectRatio = 1;
     }
@@ -1429,7 +1429,7 @@
     var cx = node.x + node.width/2, cy = node.y + node.height/2;
     var dx = towardX-cx, dy = towardY-cy;
     if (dx===0 && dy===0) return {x:cx,y:cy};
-    // 臨床疑問・結論・メモ・レビュー系エビデンス(角丸長方形)は長方形に近い形なので、
+    // 臨床疑問・結論・付箋・レビュー系エビデンス(角丸長方形)は長方形に近い形なので、
     // 矢印が中に埋まらないよう長方形との交点を厳密に計算する
     // (楕円近似だと角に近い方向で内側に入り込んでしまうため。ノードを大きくするほど誤差が目立つ)
     var isRectLike = node.nodeType === 'question' || node.nodeType === 'conclusion' || node.nodeType === 'memo' ||
@@ -1672,7 +1672,7 @@
       });
       return;
     }
-    var html = '<h3>' + ({paper:'エビデンスノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'メモノート'}[node.nodeType]) + '</h3>';
+    var html = '<h3>' + ({paper:'エビデンスノード',question:'臨床疑問ノード',conclusion:'自分の結論ノード',memo:'付箋'}[node.nodeType]) + '</h3>';
     if (node.nodeType === 'paper'){
       html += '<div class="p-top">' +
         '<select id="f-studytype" class="p-tag-select">' + STUDY_TYPES.map(function(t){
@@ -1834,7 +1834,7 @@
       'add-paper': 'キャンバスをクリックするとエビデンスノードを追加します。',
       'add-question': 'キャンバスをクリックすると臨床疑問ノードを追加します(地図に1つまで)。',
       'add-conclusion': 'キャンバスをクリックすると自分の結論ノードを追加します(地図に1つまで)。',
-      'add-memo': 'キャンバスをクリックするとメモノートを追加します。',
+      'add-memo': 'キャンバスをクリックすると付箋を追加します。',
       'add-edge': '始点ノード→終点ノードの順にクリックするとリンクを作成します。',
       'add-axis': 'キャンバスをクリックすると原点・軸の注釈を追加します(地図に1つまで)。',
       'pick-year-origin': '整列の基準にしたい位置(既存のノードでも空白でも可)をクリックしてください。そこを左上として、右下方向に年代(横)×被引用数(縦)で並びます。'
@@ -1883,7 +1883,7 @@
   }
 
   /* 発表年に基づいてエビデンスノードを一度だけ整列する(常時動く物理演算ではない)。
-     発表年のないノード(臨床疑問・結論・メモ、年未入力のエビデンス、位置固定ノード)は対象外で今の位置のまま。
+     発表年のないノード(臨床疑問・結論・付箋、年未入力のエビデンス、位置固定ノード)は対象外で今の位置のまま。
      ボタンを押すと、まず基準にしたい原点をキャンバス上でクリックしてもらい(pick-year-originモード)、
      その点を左上として右下方向に年代(横)×被引用数(縦、少ない順)で並べる。 */
   function layoutByYear(){
