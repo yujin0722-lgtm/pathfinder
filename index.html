@@ -168,6 +168,7 @@
 
   #mapsModal, #batchAddModal, #publishModal { display: none; position: fixed; inset: 0; background: rgba(28,43,51,0.45); align-items: center; justify-content: center; z-index: 50; }
   #mapsModal .box, #batchAddModal .box, #publishModal .box { background: var(--panel); border-radius: 10px; padding: 20px; width: 440px; max-height: 70vh; overflow-y: auto; }
+  #mapsModal .box { width: 560px; max-width: 92vw; }
   #mapsModal h3, #batchAddModal h3, #publishModal h3 { margin: 0 0 12px; font-size: 15px; }
   #batchAddModal .hint, #publishModal .hint { font-size: 12px; color: var(--sub); margin: 0 0 8px; }
   #batch-add-input { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; resize: vertical; }
@@ -176,11 +177,15 @@
   #publish-status { font-size: 13px; margin-bottom: 8px; }
   #publish-link-row { display: flex; gap: 6px; margin-bottom: 8px; }
   #publish-link-input { flex: 1; font-size: 12px; }
-  .map-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); gap: 10px; }
+  .map-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); gap: 6px 10px; }
+  .map-row > div:first-child { flex: 1 1 140px; min-width: 120px; }
+  .map-row.current-row { background: var(--accent-soft); border-radius: 8px; padding-left: 8px; padding-right: 8px; margin: 0 -8px; }
   .map-row .meta { font-size: 12px; color: var(--sub); }
   .map-row .name { font-size: 13px; }
-  .map-row .name.current { font-weight: 700; }
+  .map-row .name.current { font-weight: 700; color: var(--accent); }
   .map-row button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .map-row button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .map-row button.lock-btn.locked { border-color: #c98a2a; color: #a15c00; background: #fff6e6; }
 
   /* 疑似フルスクリーン(Citrailと同じ方式): ヘッダー等を隠してキャンバスを広げる */
   body.fullscreen #topbar, body.fullscreen #toolbar, body.fullscreen #statusbar { display: none; }
@@ -348,10 +353,13 @@
 
   // 手動リンクの色プリセット(パステル調)。ノードの色プリセットと同じ色の並び順(グレー・青・緑・黄・赤・紫)に揃えている
   var EDGE_COLOR_PRESETS = ["#b8b8b8","#a9c9ef","#a8d8b9","#f6cf8e","#f4a9a8","#c9b3e0"];
-  // ノードの色プリセット(4種類のノード共通)。基本6色(グレー・青・緑・黄・赤・紫) x 明るい/濃いの2段階(6列x2行のグリッドで並ぶ)
+  // ノードの色プリセット(4種類のノード共通)。基本12色(グレー・青・緑・黄・赤・紫・橙・桃・青緑・茶・紺・黄緑) x 明るい/濃いの2段階
+  // (6列のグリッドで並ぶため、4行で表示される: 1〜2行目が最初の6色、3〜4行目が残り6色)
   var NODE_COLOR_PRESETS = [
     "#f2f2f2","#cfe9fb","#d7f0d8","#fff4c2","#ffe3e3","#e6d7f5",
-    "#cfcfcf","#8fc4ea","#a3d9a5","#ffe066","#f2a6a6","#c9a8e8"
+    "#cfcfcf","#8fc4ea","#a3d9a5","#ffe066","#f2a6a6","#c9a8e8",
+    "#ffe4c4","#ffd9ec","#cdf3ec","#e8d7c3","#d6ddf7","#eaf5bd",
+    "#ffb768","#ff9ecb","#7ad9c9","#c8a074","#9fadea","#cde26a"
   ];
   // エビデンスノードのタグ用配色。同じタグ文字列は常に同じ色になるよう、文字列のハッシュ値でパレットから選ぶ
   var TAG_COLOR_PALETTE = [
@@ -790,21 +798,32 @@
   function closeMapsModal(){
     document.getElementById('mapsModal').style.display = 'none';
   }
+  /* 地図一覧での削除防止ロック(地図データ本体ではなく一覧のメタ情報として保持する。端末ローカルの設定) */
+  function toggleMapLock(id){
+    var index = loadMapsIndex();
+    var entry = index.find(function(m){ return m.id === id; });
+    if (!entry) return;
+    entry.locked = !entry.locked;
+    saveMapsIndex(index);
+    renderMapsList();
+  }
+
   function renderMapsList(){
     var listEl = document.getElementById('mapsList');
     var index = loadMapsIndex().slice().sort(function(a,b){ return (b.updatedAt||'').localeCompare(a.updatedAt||''); });
     if (!index.length){ listEl.textContent = '保存された地図はまだありません。'; return; }
     listEl.innerHTML = '';
     index.forEach(function(m){
+      var isCurrent = (m.id === currentMapId);
       var row = document.createElement('div');
-      row.className = 'map-row';
+      row.className = 'map-row' + (isCurrent ? ' current-row' : '');
 
       var infoWrap = document.createElement('div');
       var nameEl = document.createElement('div');
-      nameEl.className = 'name' + (m.id === currentMapId ? ' current' : '');
-      nameEl.textContent = m.title || '無題の地図';
+      nameEl.className = 'name' + (isCurrent ? ' current' : '');
+      nameEl.textContent = (isCurrent ? '● ' : '') + (m.title || '無題の地図');
       nameEl.style.cursor = 'default';
-      nameEl.title = '地図の名前は臨床疑問ノードの内容から自動的に決まります';
+      nameEl.title = isCurrent ? '現在開いている地図です' : '地図の名前は臨床疑問ノードの内容から自動的に決まります';
 
       var metaEl = document.createElement('div');
       metaEl.className = 'meta';
@@ -815,20 +834,32 @@
       infoWrap.appendChild(metaEl);
       row.appendChild(infoWrap);
 
+      var lockBtn = document.createElement('button');
+      lockBtn.className = 'lock-btn' + (m.locked ? ' locked' : '');
+      lockBtn.textContent = m.locked ? '🔒 ロック中' : '🔓 ロック';
+      lockBtn.title = m.locked ? 'クリックするとロックを解除します(解除すると削除できるようになります)' : 'クリックするとこの地図をロックし、誤って削除できないようにします';
+      lockBtn.addEventListener('click', function(){ toggleMapLock(m.id); });
+      row.appendChild(lockBtn);
+
       var openBtn = document.createElement('button');
-      openBtn.textContent = m.id === currentMapId ? '開いています' : '開く';
-      openBtn.disabled = (m.id === currentMapId);
+      openBtn.textContent = isCurrent ? '開いています' : '開く';
+      openBtn.disabled = isCurrent;
       openBtn.addEventListener('click', function(){ closeMapsModal(); openMap(m.id); });
       row.appendChild(openBtn);
 
       var delBtn = document.createElement('button');
       delBtn.textContent = '削除';
       delBtn.style.color = '#a02050'; delBtn.style.borderColor = '#e3a1b8';
-      delBtn.addEventListener('click', function(){
-        if (!confirm('「' + (m.title || '無題の地図') + '」を削除しますか？この操作は取り消せません。')) return;
-        deleteMap(m.id);
-        renderMapsList();
-      });
+      if (m.locked){
+        delBtn.disabled = true;
+        delBtn.title = 'ロックされているため削除できません。先に「🔒 ロック中」ボタンでロックを解除してください。';
+      } else {
+        delBtn.addEventListener('click', function(){
+          if (!confirm('「' + (m.title || '無題の地図') + '」を削除しますか？この操作は取り消せません。')) return;
+          deleteMap(m.id);
+          renderMapsList();
+        });
+      }
       row.appendChild(delBtn);
 
       listEl.appendChild(row);
